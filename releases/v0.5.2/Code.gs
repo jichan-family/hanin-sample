@@ -427,7 +427,7 @@ function findDeployment_() {
 function applyUpdate(pw) { checkPw_(pw); return doUpdate_(); }
 
 /** 편집기에서 ▶ 실행: 저장소의 최신 코드로 바꾸고 배포까지 */
-function updateNow() { var r = doUpdate_(); Logger.log(r.version + ' 업데이트 완료 · ' + r.files.join(', ') + ' · ' + r.url); return r; }
+function updateNow() { ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL); var r = doUpdate_(); Logger.log(r.version + ' 업데이트 완료 · ' + r.files.join(', ') + ' · ' + r.url); return r; }
 
 function doUpdate_() {
   var repo = updRepo_();
