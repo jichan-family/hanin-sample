@@ -405,7 +405,7 @@ function scriptApi_(method, path, body) {
   var r = UrlFetchApp.fetch('https://script.googleapis.com/v1/projects/' + ScriptApp.getScriptId() + path, o);
   var c = r.getResponseCode(), t = r.getContentText();
   if (c >= 300) {
-    if (/Apps Script API|has not been used|is disabled|not enabled/i.test(t)) throw new Error('Apps Script API가 꺼져 있습니다. script.google.com/home/usersettings 에서 켜 주세요. (켠 뒤 몇 분 걸릴 수 있어요)');
+    if (/Apps Script API|has not been used|is disabled|not enabled/i.test(t)) throw new Error('Apps Script API 사용 오류 (' + c + '): ' + t.slice(0, 500));
     if (c === 403 || c === 401) throw new Error('권한 오류 (' + c + '): ' + t.slice(0, 300));
     throw new Error('Apps Script API 오류 (' + c + '): ' + t.slice(0, 300));
   }
