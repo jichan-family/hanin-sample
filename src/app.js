@@ -1,0 +1,1062 @@
+const OCL_URL = 'https://cdn.jsdelivr.net/npm/openchemlib@9.26.0/dist/openchemlib.js';
+const KINDS = ['단분자', '고분자', '이온성물질'];
+const MOD_TYPES = ['없음', '말단개질', '그래프트', '반응생성물', '개질'];
+const DEFAULT_COS = ['한인', '엘에스켐', '제이와이트리켐', '케미웍스'];
+const EX_DOCS = ['연구개발용확인서', 'CAS미부여확인서', '물질식별정보', '단량체정보'];
+const SUB_DOCS = ['자진확인서', 'MSDS'];
+const DOC_LABEL = { 연구개발용확인서: '연구개발용 확인서', CAS미부여확인서: 'CAS 미부여 확인서', 물질식별정보: '물질 식별정보', 단량체정보: '단량체 정보', 자진확인서: '자진확인서', MSDS: 'MSDS' };
+const S = window.S = { data: {}, samples: [], tab: '전체', kind: '전체', view: 'list', q: '', sort: 'new', pw: null, hits: null, OCL: null, mols: {}, dmols: {}, qEditor: null, fEditor: null, mEditor: null, editing: null, today: '', setTab: '기타', ptTab: '고객사', dTab: 'info' };
+
+// ---------- 공통 ----------
+const call = window.serverCall = (fn, ...args) => new Promise((ok, no) => google.script.run.withSuccessHandler(ok).withFailureHandler(no)[fn](...args));
+const $ = id => document.getElementById(id);
+const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const rows = t => S.data[t] || (S.data[t] = []);
+function upsert(t, o) { const L = rows(t), i = L.findIndex(x => x.id === o.id); if (i >= 0) L[i] = o; else L.push(o); }
+async function save(t, o) { const r = await call('saveRow', S.pw, t, o); upsert(t, r); return r; }
+async function remove(t, id) { await call('deleteRow', S.pw, t, id); S.data[t] = rows(t).filter(x => x.id !== id); if (t === '샘플') S.samples = rows('샘플'); }
+function setting(id, def) { const r = rows('설정').find(x => x.id === id); return r && r['값'] !== '' ? r['값'] : def; }
+const errMsg = e => esc((e && e.message) || e);
+function flash(id, text, ok = true) { const el = $(id); if (!el) return; el.className = 'msg ' + (ok ? 'ok' : 'bad'); el.innerHTML = text; }
+const dash = v => (v == null || v === '') ? '<span class="dash">-</span>' : esc(v);
+const list = v => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+
+// ---------- 출고사 · 고객사 ----------
+function coRows() { return rows('출고사').filter(r => r['정식'] === 'Y').sort((a, b) => (+a['순서'] || 99) - (+b['순서'] || 99)); }
+function coNames() { const L = coRows().map(r => r['이름']); return L.length ? L : DEFAULT_COS; }
+const coOf = n => rows('출고사').find(r => r['이름'] === n) || null;
+const coColor = n => { const c = coOf(n); return (c && c['색']) || (DEFAULT_COS.includes(n) ? { 한인: '#1f6feb', 엘에스켐: '#1a7f37', 제이와이트리켐: '#c4520a', 케미웍스: '#6e7781' }[n] : '#8c959f'); };
+function coDocs(n) { const c = coOf(n); if (c) return list(c['작성서류']); return n === '한인' ? [...EX_DOCS, ...SUB_DOCS] : n === '엘에스켐' ? ['CAS미부여확인서', '물질식별정보', '단량체정보', 'MSDS'] : ['MSDS']; }
+const coBadge = (n, big) => `<span class="b co ${big ? 'big' : ''}" style="--c:${coColor(n)}">${esc(n)}</span>`;
+const companyOf = s => s['관리회사'] === '기타' ? (s['기타회사'] || '기타') : s['관리회사'];
+const noTag = s => `<span class="no co" style="--c:${coColor(companyOf(s))}">${esc(s['관리번호'] || '번호 없음')}</span>`;
+const namesOf = s => list(s['명의']);
+function etcNames() {
+  const N = coNames(), set = new Set();
+  S.samples.forEach(s => { if (s['관리회사'] === '기타' && s['기타회사']) set.add(s['기타회사']); namesOf(s).forEach(n => { if (!N.includes(n)) set.add(n); }); });
+  rows('출고').forEach(x => { if (x['명의'] && !N.includes(x['명의'])) set.add(x['명의']); });
+  return [...set];
+}
+const custOf = n => rows('고객사').find(r => r['회사명'] === n) || null;
+function seg(id, opts, chosen, type, colored) {
+  $(id).innerHTML = opts.map(o => `<label><input type="${type}" name="${id}" value="${esc(o)}" ${chosen.includes(o) ? 'checked' : ''}><span class="${colored ? 'co' : ''}" style="${colored ? '--c:' + coColor(o) : ''}">${esc(o)}</span></label>`).join('');
+}
+const segVal = id => { const x = document.querySelector(`input[name="${id}"]:checked`); return x ? x.value : ''; };
+const segVals = id => [...document.querySelectorAll(`input[name="${id}"]:checked`)].map(x => x.value);
+
+// ---------- 날짜 ----------
+const pad = n => String(n).padStart(2, '0');
+const fmt = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parseD = s => { const m = String(s || '').match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
+const yearEnd = s => { const d = parseD(s); return d ? fmt(new Date(d.getFullYear() + 1, d.getMonth(), d.getDate() - 1)) : ''; };
+const daysSince = s => { const d = parseD(s), t = parseD(S.today); return d && t ? Math.round((t - d) / 864e5) : 0; };
+const korDate = s => { const d = parseD(s); return d ? `${d.getFullYear()}년 ${pad(d.getMonth() + 1)}월 ${pad(d.getDate())}일` : ''; };
+const dotDate = s => { const d = parseD(s); return d ? `${d.getFullYear()}. ${pad(d.getMonth() + 1)}. ${pad(d.getDate())}.` : ''; };
+const pointDate = s => { const d = parseD(s); return d ? `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}` : ''; };
+
+// ---------- 화면 이동 · 뒤로가기 ----------
+const NAV = { stack: [], seq: 0, waiting: null };
+const H = () => (window.google && google.script && google.script.history) || null;
+function pushNav(e) { e.n = ++NAV.seq; NAV.stack.push(e); try { const h = H(); if (h) h.push({ n: e.n }); else history.pushState({ n: e.n }, ''); } catch (er) {} }
+function undoNav(e) { if (e.t === 'modal') $(e.id).classList.remove('open'); else if (e.t === 'view') { showView(e.prev); if (e.from) showDetail(e.from, true, e.fromTab); } }
+function onNavChange(n) { if (NAV.waiting) { clearTimeout(NAV.waiting); NAV.waiting = null; } while (NAV.stack.length && NAV.stack[NAV.stack.length - 1].n > (n || 0)) undoNav(NAV.stack.pop()); }
+function navBack(fallback) {
+  try { history.back(); } catch (er) {}
+  NAV.waiting = setTimeout(() => { NAV.waiting = null; const e = NAV.stack.pop(); if (e) undoNav(e); else if (fallback) fallback(); }, 350);
+}
+try { const h = H(); if (h) h.setChangeHandler(ev => onNavChange(ev.state && ev.state.n)); else window.addEventListener('popstate', ev => onNavChange(ev.state && ev.state.n)); } catch (er) {}
+window.openModal = (id, noPush) => { $(id).classList.add('open'); if (!noPush) pushNav({ t: 'modal', id }); };
+window.closeModal = id => {
+  const top = NAV.stack[NAV.stack.length - 1];
+  if (top && top.t === 'modal' && top.id === id) navBack(); else { $(id).classList.remove('open'); NAV.stack = NAV.stack.filter(e => !(e.t === 'modal' && e.id === id)); }
+};
+window.closeAllModals = closeAllModals; function closeAllModals() { document.querySelectorAll('.modal.open').forEach(m => m.classList.remove('open')); NAV.stack = NAV.stack.filter(e => e.t !== 'modal'); }
+function showView(v) {
+  S.view = v;
+  document.querySelectorAll('.nav').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  ['list', 'partners', 'msds', 'settings'].forEach(k => $('view_' + k).style.display = k === v ? '' : 'none');
+  if (v === 'settings') renderSettings(); if (v === 'msds') msdsRefresh(); if (v === 'list') render(); if (v === 'partners') renderPartners();
+  window.scrollTo(0, 0);
+}
+window.navTo = (v, from, fromTab) => {
+  if (v === 'msds' && !from) { S.msds = blankMsds(); S.msdsCtx = null; }
+  if (v === S.view && v !== 'msds') return;
+  closeAllModals(); pushNav({ t: 'view', prev: S.view, from: from || null, fromTab }); S.msdsFrom = from || null; S.msdsFromTab = fromTab; showView(v);
+};
+window.goBack = () => navBack(() => { showView('list'); if (S.msdsFrom) showDetail(S.msdsFrom, false, S.msdsFromTab); });
+
+// ---------- 구조 라이브러리 ----------
+let oclPromise = null;
+function loadOCL() { if (!oclPromise) oclPromise = import(OCL_URL).then(m => { S.OCL = m.default || m; return S.OCL; }); return oclPromise; }
+function molFrom(idcode, coords) { try { return S.OCL.Molecule.fromIDCode(idcode, coords || undefined); } catch (e) { return null; } }
+function molOf(s) { if (!s || !s.idcode) return null; if (!(s.id in S.mols)) S.mols[s.id] = molFrom(s.idcode, s['좌표']); return S.mols[s.id]; }
+function parseText(txt) {
+  const M = S.OCL.Molecule, t = (txt || '').trim(); if (!t) return null;
+  if (/M\s+END/.test(t) || /V[23]000/.test(t)) return M.fromMolfile(t);
+  if (/^<\?xml|<CDXML/i.test(t)) throw new Error('CDXML 형식은 읽을 수 없습니다. ChemDraw에서 Copy As → SMILES 또는 Molfile로 복사해 주세요.');
+  return M.fromSmiles(t.split(/\s+/)[0]);
+}
+const smilesOf = m => { try { return m.toIsomericSmiles ? m.toIsomericSmiles() : m.toSmiles(); } catch (e) { return ''; } };
+function prepQuery(mol, skeleton) {
+  const M = S.OCL.Molecule, f = mol.getCompactCopy();
+  f.setFragment(true); f.ensureHelperArrays(M.cHelperRings);
+  if (skeleton) { const any = M.cBondQFSingle | M.cBondQFDouble | M.cBondQFTriple | M.cBondQFDelocalized; for (let b = 0; b < f.getAllBonds(); b++) f.setBondQueryFeature(b, any, true); return f; }
+  const rs = f.getRingSet(), ar = [];
+  for (let r = 0; r < rs.getSize(); r++) { const atoms = rs.getRingAtoms(r), bonds = rs.getRingBonds(r); ar.push({ atoms, bonds, arom: bonds.every(b => f.isAromaticBond(b) || f.isDelocalizedBond(b)), het: atoms.some(a => f.getAtomicNo(a) !== 6) }); }
+  const mark = ar.map(r => r.arom && r.het); let grow = true;
+  while (grow) { grow = false; ar.forEach((r, i) => { if (mark[i] || !r.arom) return; if (ar.some((o, j) => mark[j] && o.atoms.some(a => r.atoms.includes(a)))) { mark[i] = true; grow = true; } }); }
+  const flag = M.cBondQFSingle | M.cBondQFDouble | M.cBondQFDelocalized;
+  ar.forEach((r, i) => { if (!mark[i]) return; r.bonds.forEach(b => f.setBondQueryFeature(b, flag, true)); r.atoms.forEach(a => f.setAtomQueryFeature(a, M.cAtomQFAromatic, true)); });
+  return f;
+}
+function svgOf(mol, w, h, hl) {
+  const m = mol.getCompactCopy();
+  if (hl) hl.forEach(a => { if (a >= 0) m.setAtomColor(a, S.OCL.Molecule.cAtomColorRed); });
+  return m.toSVG(w, h, undefined, { autoCrop: true, autoCropMargin: 8, suppressChiralText: true, suppressCIPParity: true });
+}
+function chemInfo(mol) { const f = mol.getMolecularFormula(), ic = mol.getIDCodeAndCoordinates(); return { formula: f.formula, mw: f.relativeWeight.toFixed(2), idcode: ic.idCode, coords: ic.coordinates, index: mol.getIndex().join(',') }; }
+function ionParts(mol) {
+  const groups = new Map();
+  mol.getFragments().forEach(f => {
+    let q = 0; for (let a = 0; a < f.getAllAtoms(); a++) q += f.getAtomCharge(a);
+    const smi = smilesOf(f), fm = f.getMolecularFormula();
+    if (!groups.has(smi)) groups.set(smi, { smi, q, formula: fm.formula, mw: fm.relativeWeight, n: 0 });
+    groups.get(smi).n++;
+  });
+  const list = [...groups.values()];
+  return { list, total: list.reduce((a, g) => a + g.q * g.n, 0), multi: list.reduce((a, g) => a + g.n, 0) > 1, charged: list.some(g => g.q) };
+}
+function ionHtml(m, balanceFn) {
+  const p = ionParts(m); if (!p.multi && !p.charged) return '';
+  const c = m.getMolecularFormula(), qs = q => q ? (q > 0 ? `+${q > 1 ? q : ''}` : `−${q < -1 ? -q : ''}`) : '중성';
+  return `<b>전체(염)</b> ${esc(c.formula)} · ${c.relativeWeight.toFixed(2)} · 전하 합 ${p.total > 0 ? '+' : ''}${p.total}` +
+    (p.charged && p.total !== 0 ? ` <span class="b bad">전하 불균형</span> <button class="sm" onclick="${balanceFn}">개수 맞추기</button>` : '') + '<br>' +
+    p.list.map(g => `${g.q > 0 ? '양이온' : g.q < 0 ? '음이온' : '조각'} (${qs(g.q)}) ${esc(g.formula)} · ${g.mw.toFixed(2)}${g.n > 1 ? ` × ${g.n}` : ''}`).join('<br>');
+}
+const gcd = (a, b) => b ? gcd(b, a % b) : a;
+function balanced(m) {
+  const p = ionParts(m), cat = p.list.filter(g => g.q > 0), an = p.list.filter(g => g.q < 0);
+  if (cat.length !== 1 || an.length !== 1) { alert('양이온 1종과 음이온 1종일 때만 자동으로 맞출 수 있습니다.'); return null; }
+  const qc = cat[0].q, qa = -an[0].q, g = gcd(qc, qa);
+  const others = p.list.filter(x => !x.q).flatMap(x => Array(x.n).fill(x.smi));
+  return S.OCL.Molecule.fromSmiles([...Array(qa / g).fill(cat[0].smi), ...Array(qc / g).fill(an[0].smi), ...others].join('.'));
+}
+function checkMol(mol) {
+  const w = [];
+  for (let a = 0; a < mol.getAllAtoms(); a++) if (mol.getAtomicNo(a) === 0) { w.push('* 또는 R 원자가 있습니다. 고분자는 단량체로 등록하세요.'); break; }
+  const p = ionParts(mol);
+  if (p.charged && p.total !== 0) w.push(`전하 합이 ${p.total > 0 ? '+' : ''}${p.total}입니다. 이온 개수를 확인하세요 ([개수 맞추기]).`);
+  else if (p.multi && !p.charged) w.push('구조가 여러 조각으로 나뉘어 있습니다. 끊어진 결합이 없는지 확인하세요.');
+  return w;
+}
+
+// ---------- 단량체 ----------
+const parseMono = str => String(str || '').split(';').map(x => x.trim()).filter(Boolean).map(x => { const p = x.split('|').map(y => y.trim()); return p.length >= 3 ? { abbr: p[0], name: p[1], cas: p[2] } : { abbr: p[0], name: p[1] || p[0], cas: '' }; });
+const fmtMono = L => L.filter(m => m.abbr || m.name).map(m => [m.abbr || m.name, m.name || m.abbr, m.cas || ''].join('|')).join('; ');
+function parseMod(s) {
+  let o = {}; try { o = typeof s === 'string' ? JSON.parse(s || '{}') : (s || {}); } catch (e) { o = {}; }
+  let list = o.물질; if (typeof list === 'string') list = list ? [{ abbr: '', name: list, cas: '' }] : []; if (!Array.isArray(list)) list = [];
+  return { 방식: o.방식 || '', 기반: o.기반 || '', 물질: list };
+}
+function dictFind(m) {
+  const D = rows('단량체'), a = String(m.abbr || '').trim().toLowerCase(), c = String(m.cas || '').trim();
+  return (a && D.find(d => String(d['약어']).trim().toLowerCase() === a)) || (c && D.find(d => d.CAS === c)) || null;
+}
+function monoMol(m) {
+  if (m.idcode) return molFrom(m.idcode, m.coords);
+  const d = dictFind(m); if (!d || !d.idcode) return null;
+  if (!(d.id in S.dmols)) S.dmols[d.id] = molFrom(d.idcode, d['좌표']);
+  return S.dmols[d.id];
+}
+function polyParts(s) {
+  const mono = parseMono(s['단량체']), md = parseMod(s['개질']);
+  let base = mono;
+  if (md.기반 && !mono.length) { const b = S.samples.find(x => x.id === md.기반); if (b) base = parseMono(b['단량체']); }
+  return { mono: base, mod: md.방식 && md.방식 !== '없음' ? md.물질 : [], md };
+}
+function monoView(s, w, h) {
+  if (!S.OCL) return '';
+  const { mono, mod } = polyParts(s);
+  const items = [...mono.map(m => ({ m, mod: false })), ...mod.map(m => ({ m, mod: true }))].map(x => ({ ...x, mol: monoMol(x.m) }));
+  if (!items.some(x => x.mol)) return '';
+  const show = items.slice(0, 3), more = items.length - show.length, ww = Math.floor(w / show.length);
+  return '<div class="monos">' + show.map((x, i) => `${i ? '<span class="plus">+</span>' : ''}<div class="m ${x.mod ? 'mod' : ''}">${x.mol ? svgOf(x.mol, ww, h) : '<span class="nostruct">구조 없음</span>'}<small>${esc(x.m.abbr || x.m.name)}${x.mod ? ' (개질)' : ''}</small></div>`).join('') +
+    (more > 0 ? `<span class="hint">외 ${more}개</span>` : '') + '</div>';
+}
+
+// ---------- 제출 형태 ----------
+const SOLV_SHORT = { EA: 'EA', MEK: 'MEK', ACT: 'Acetone', TOL: 'Toluene', HEX: 'Hexane', THF: 'THF', MC: 'MC', PGMEA: 'PGMEA', PGME: 'PGME' };
+const SOLV_ALIAS = { ACETONE: 'ACT', TOLUENE: 'TOL', HEXANE: 'HEX', 'N-HEXANE': 'HEX', 'ETHYL ACETATE': 'EA', DCM: 'MC', 'METHYLENE CHLORIDE': 'MC' };
+function parseForm(str) { try { const o = typeof str === 'string' ? JSON.parse(str || 'null') : str; if (o && o.t) return o; } catch (e) {} return null; }
+function legacyForm(s) {
+  const m = String((s && s['용매농도']) || '').match(/(\d+(?:\.\d+)?)\s*%\s*in\s*(.+)/i); if (!m) return null;
+  const ks = [...new Set(m[2].split(/[\/,+]| and /i).map(t => t.trim().toUpperCase()).map(k => SOLV_ALIAS[k] || k).filter(k => Docs.SOLV[k]))];
+  if (!ks.length) return null; const p = parseFloat(m[1]), rest = 100 - p;
+  return { t: 'sol', p, s: ks.map(k => ({ k, p: +(rest / ks.length).toFixed(2) })) };
+}
+const formText = f => !f ? '-' : f.t === 'neat' ? '물질 그대로' : `${f.p}% in ${f.s.map(x => SOLV_SHORT[x.k] || x.k).join(' + ')}`;
+const formSuffix = f => f && f.t === 'sol' && f.s.length ? `(${f.p}% ${f.s.map(x => SOLV_SHORT[x.k] || x.k).join('+')})` : '';
+const baseName = s => Docs.safeName(s ? `${s['관리번호'] ? s['관리번호'] + '_' : ''}${s['제품명']}` : '');
+
+// ---------- 신고면제 · 상태 ----------
+const exOf = (sid, inst) => rows('신고면제').filter(e => e['샘플id'] === sid && (!inst || (e['기관'] || '동우화인켐') === inst)).sort((a, b) => (b['신청일'] || '').localeCompare(a['신청일'] || ''));
+const shipsOf = sid => rows('출고').filter(e => e['샘플id'] === sid).sort((a, b) => (b['요청일'] || b['등록일'] || '').localeCompare(a['요청일'] || a['등록일'] || ''));
+function exState(e) {
+  if (e['결과'] === '비대상') return { k: '반려', cls: 'bad', txt: '비대상(면제 안 됨)' };
+  if (e['면제번호']) {
+    if (e['기간종료'] && e['기간종료'] < S.today) return { k: '만료', cls: 'bad', txt: '기간 만료 · 재신청 필요' };
+    return { k: '유효', cls: 'ok', txt: `면제 유효 ~${e['기간종료'] || '?'}` };
+  }
+  if (e['신청일']) { const d = daysSince(e['신청일']); return { k: '대기', cls: d > 14 ? 'bad' : 'wait', txt: `통지 대기 ${d}일째${d > 14 ? ' · 지연' : ''}` }; }
+  return { k: '없음', cls: 'etc', txt: '기록 없음' };
+}
+function sampleEx(sid, inst) { const L = exOf(sid, inst).map(e => ({ e, st: exState(e) })); return L.find(x => x.st.k === '유효') || L.find(x => x.st.k === '대기') || L[0] || null; }
+function sampleStatus(sid) {
+  const L = exOf(sid), sh = shipsOf(sid)[0];
+  const pend = L.find(e => exState(e).k === '대기');
+  if (pend) { const d = daysSince(pend['신청일']); return { txt: d > 14 ? `신고면제 진행중 · ${d}일` : '신고면제 진행중', cls: d > 14 ? 'bad' : 'wait' }; }
+  if (sh && sh['서류제출일']) return { txt: '서류 제출완료', cls: 'ok' };
+  if (L.length && !L.some(e => exState(e).k === '유효') && L.some(e => exState(e).k === '만료')) return { txt: '재신청 필요', cls: 'bad' };
+  return null;
+}
+const kindsOf = s => String(s['종류'] || '').replace(/단물질/g, '단분자').replace(/이온성액체/g, '이온성물질').split(',').map(x => x.trim()).filter(Boolean);
+
+// ---------- 목록 ----------
+function inTab(s, t) {
+  if (t === '전체') return true;
+  if (t === '기타') { const N = coNames(); return s['관리회사'] === '기타' || namesOf(s).some(n => !N.includes(n)); }
+  return s['관리회사'] === t || namesOf(s).includes(t);
+}
+const inKind = (s, k) => k === '전체' || kindsOf(s).includes(k);
+function cardBadges(s) {
+  const n = namesOf(s), own = companyOf(s);
+  const show = n.length >= 2 ? n : (n.length === 1 && n[0] !== own ? n : []);
+  return show.map(x => coBadge(x)).join('');
+}
+function renderFilters() {
+  const tabs = ['전체', ...coNames(), ...(etcNames().length || S.samples.some(s => s['관리회사'] === '기타') ? ['기타'] : [])];
+  $('tabs').innerHTML = tabs.map(t => `<button class="tab ${S.tab === t ? 'on' : ''}" onclick="setTab('${esc(t)}')">${esc(t)}<span class="n">${S.samples.filter(s => inTab(s, t)).length}</span></button>`).join('');
+  const base = S.samples.filter(s => inTab(s, S.tab));
+  $('kinds').innerHTML = ['전체', ...KINDS].map(k => `<button class="chip ${S.kind === k ? 'on' : ''}" onclick="setKind('${k}')">${k}<span class="n">${base.filter(s => inKind(s, k)).length}</span></button>`).join('');
+}
+window.setTab = t => { S.tab = t; render(); };
+window.setKind = k => { S.kind = k; render(); };
+const numKey = s => { const m = String(s['관리번호'] || '').match(/(\d+)$/); return m ? +m[1] : 0; };
+function render() {
+  if (!S.samples) return;
+  renderFilters();
+  let L = S.samples.filter(s => inTab(s, S.tab) && inKind(s, S.kind));
+  const q = S.q.trim().toLowerCase();
+  if (q) L = L.filter(s => ['관리번호', '제품명', '물질명', 'CAS', '용도', '고객사', '고객사담당자', '비고', '성상', '분자식', '단량체', '용매농도', '명의', '기타회사'].some(k => (s[k] || '').toLowerCase().includes(q)));
+  if (S.hits) L = L.filter(s => S.hits.has(s.id));
+  if (S.hits && S.hitMode === 'sim') L.sort((a, b) => S.hits.get(b.id).score - S.hits.get(a.id).score);
+  else if (S.sort === 'name') L.sort((a, b) => a['제품명'].localeCompare(b['제품명'], 'ko'));
+  else if (S.sort === 'num') L.sort((a, b) => companyOf(a).localeCompare(companyOf(b), 'ko') || numKey(a) - numKey(b));
+  else L.sort((a, b) => { const ao = a['출처'] === '기존 자료', bo = b['출처'] === '기존 자료'; if (ao !== bo) return ao ? 1 : -1; if (ao) return numKey(b) - numKey(a); return (b['등록일'] || '').localeCompare(a['등록일'] || ''); });
+  if (q && /^\S+-\d+$/.test(q)) L.sort((a, b) => ((b['관리번호'] || '').toLowerCase() === q) - ((a['관리번호'] || '').toLowerCase() === q));
+  $('status').textContent = `${L.length}건` + (S.hits ? ` · 구조 검색 결과 (${{ sub: '부분구조', exact: '완전일치', sim: '유사구조' }[S.hitMode]})` : '');
+  $('grid').innerHTML = L.map(s => {
+    const h = S.hits && S.hits.get(s.id), st = sampleStatus(s.id);
+    return `<div class="card" onclick="showDetail('${s.id}')">
+      <div class="struct" data-id="${s.id}">${st ? `<span class="b ${st.cls} stbadge">${st.txt}</span>` : ''}${s['출처'] === '기존 자료' && s['검증'] !== 'Y' ? '<span class="olddot" title="기존 자료 (엑셀에서 이관, 미검증)"></span>' : ''}<div class="sv">${s.idcode ? '' : noStruct(s)}</div></div>
+      <div class="body"><div class="cardhead">${noTag(s)}<div class="name">${esc(s['제품명'])}</div></div>
+      <div class="chem">${s['물질명'] ? esc(s['물질명']) : '<span class="dash">물질명 -</span>'}</div>
+      <div class="cas">CAS ${s.CAS ? esc(s.CAS) : '<span class="dash">-</span>'}</div>
+      <div class="badges">${h && S.hitMode === 'sim' ? `<span class="b score">${Math.round(h.score * 100)}%</span>` : ''}${h && h.mono ? '<span class="b info">단량체 일치</span>' : ''}${cardBadges(s)}</div></div></div>`;
+  }).join('') || '<p class="empty">조건에 맞는 샘플이 없습니다.</p>';
+  drawCards();
+}
+function drawCards() {
+  if (!S.OCL) return;
+  document.querySelectorAll('.struct[data-id]').forEach(el => {
+    const s = S.samples.find(x => x.id === el.dataset.id); if (!s) return; const sv = el.querySelector('.sv'), m = molOf(s);
+    if (m) { const h = S.hits && S.hits.get(s.id); try { sv.innerHTML = svgOf(m, 240, 158, h && h.match); } catch (e) { sv.innerHTML = '<span class="nostruct">그리기 오류</span>'; } }
+    else { const mv = monoView(s, 238, 130); if (mv) { sv.style.width = '100%'; sv.style.height = '100%'; sv.innerHTML = mv; } }
+  });
+}
+function noStruct(s) {
+  if (s['단량체']) return '<div class="nostruct">단량체<br>' + parseMono(s['단량체']).map(m => esc(m.abbr)).join(' · ') + '</div>';
+  return '<span class="nostruct">구조 미등록</span>';
+}
+
+// ---------- 상세 ----------
+window.showDetail = (id, noPush, tab) => {
+  const s = S.samples.find(x => x.id === id); if (!s) return;
+  S.cur = s; if (tab) S.dTab = tab; else if (!$('detail').classList.contains('open')) S.dTab = 'info';
+  renderDetail();
+  if (!$('detail').classList.contains('open')) openModal('detail', noPush);
+};
+window.setDTab = t => { S.dTab = t; renderDetail(); };
+function exDot(sid) {
+  const L = exOf(sid); if (!L.length) return '';
+  const sts = L.map(e => exState(e).cls);
+  const c = sts.includes('bad') ? 'var(--bad)' : sts.includes('wait') ? '#d4a72c' : sts.includes('ok') ? 'var(--ok)' : '';
+  return c ? `<i class="tdot" style="background:${c}"></i>` : '';
+}
+function renderDetail() {
+  const s = S.cur, st = sampleStatus(s.id);
+  $('dName').innerHTML = `${noTag(s)}<span class="dn">${esc(s['제품명'])}</span>${st ? `<span class="b ${st.cls}" style="margin-left:6px">${st.txt}</span>` : ''}`;
+  $('dTabs').innerHTML = [['info', '샘플 정보', ''], ['ex', '신고면제', exDot(s.id)], ['ship', '출고', '']].map(([k, l, d]) => `<button class="tab ${S.dTab === k ? 'on' : ''}" onclick="setDTab('${k}')">${l}${d}</button>`).join('');
+  $('dInfo').style.display = S.dTab === 'info' ? '' : 'none'; $('dExTab').style.display = S.dTab === 'ex' ? '' : 'none'; $('dShipTab').style.display = S.dTab === 'ship' ? '' : 'none';
+  const m = S.OCL && molOf(s), mv = !m && S.OCL ? monoView(s, 500, 240) : '';
+  $('dStruct').classList.toggle('small', !m && !mv);
+  $('dStruct').innerHTML = m ? svgOf(m, 520, 290, S.hits && S.hits.get(s.id) && S.hits.get(s.id).match) : (mv || noStruct(s));
+  const poly = kindsOf(s).includes('고분자'), md = parseMod(s['개질']);
+  const items = [['물질명', s['물질명']], ['CAS', s.CAS], ['종류', kindsOf(s).join(', ')]];
+  if (poly) items.push(['단량체', parseMono(s['단량체']).map(x => `${x.abbr}${x.name !== x.abbr ? ' (' + x.name + ')' : ''}${x.cas ? ' ' + x.cas : ''}`).join(' · ')]);
+  else items.push(['분자식', s['분자식']], ['분자량', s['분자량']]);
+  items.push(['성상', s['성상']], ['용도', s['용도']], ['고객사', s['고객사']], ['관리회사', companyOf(s)]);
+  if (md.방식 && md.방식 !== '없음') items.push(['개질', `${md.방식}${md.기반 ? ' · 기반: ' + ((S.samples.find(x => x.id === md.기반) || {})['제품명'] || '') : ''} · ${md.물질.map(x => x.name || x.abbr).join(', ')}`]);
+  if (s['비고']) items.push(['비고', s['비고']]);
+  if (s['용매농도']) items.push(['이전 형태', s['용매농도']]);
+  $('dKv').innerHTML = items.map(([k, v]) => `<div class="k">${k}</div><div>${dash(v)}</div>`).join('');
+  $('dFoot').textContent = [s['등록일'] && '등록 ' + s['등록일'], s['수정일'] && '수정 ' + s['수정일']].filter(Boolean).join(' · ');
+  renderExTab(s); renderShipCards(s);
+  $('dEdit').onclick = () => { closeAllModals(); openForm(s.id); };
+}
+// ----- 신고면제 탭 -----
+function exDocsFor(s, co) {
+  const docs = coDocs(co), hasCas = !!s.CAS, poly = kindsOf(s).includes('고분자'), out = [];
+  if (docs.includes('연구개발용확인서')) out.push({ k: '연구개발용확인서', f: 'docx' });
+  if (docs.includes('CAS미부여확인서')) out.push({ k: 'CAS미부여확인서', f: 'docx', off: hasCas });
+  if (docs.includes('물질식별정보') && !poly) out.push({ k: '물질식별정보', f: 'png', off: hasCas });
+  if (docs.includes('단량체정보') && poly) out.push({ k: '단량체정보', f: 'xlsx', off: hasCas });
+  return out;
+}
+const FMTB = { docx: [['orig', 'Word'], ['pdf', 'PDF']], xlsx: [['orig', 'Excel'], ['pdf', 'PDF']], png: [['orig', 'PNG']] };
+function renderExTab(s) {
+  const L = exOf(s.id);
+  $('dEx').innerHTML = L.length ? L.map(e => { const st = exState(e); return `<div class="exrow"><b>${esc(e['기관'] || '동우화인켐')}</b><span class="b ${st.cls}">${st.txt}</span>
+      <span>${esc(e['면제번호'] || '')}</span><span class="hint" title="신청일 · 연구개발기간 · 신청 회사">${e['신청일'] ? '신청 ' + esc(e['신청일']) : ''}${e['기간시작'] ? ' · ' + esc(e['기간시작']) + ' ~ ' + esc(e['기간종료']) : ''}${(e['신청회사'] || '한인') !== '한인' ? ' · ' + esc(e['신청회사']) : ''}</span>
+      <span style="flex:1"></span><button class="sm edit-only" onclick="openEx('${e.id}')">수정</button></div>`; }).join('')
+    : '<div class="exrow"><span class="dash">기록 없음</span></div>';
+  const cos = coNames().filter(n => coDocs(n).some(d => EX_DOCS.includes(d)));
+  if (!S.exCo || !cos.includes(S.exCo)) S.exCo = (L[0] && L[0]['신청회사']) || (cos.includes(companyOf(s)) ? companyOf(s) : '한인');
+  const insts = rows('고객사').map(x => x['회사명']); const inst0 = (L[0] && L[0]['기관']) || '동우화인켐';
+  $('xd_co').innerHTML = cos.map(c => `<option ${c === S.exCo ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  $('xd_inst').innerHTML = (insts.length ? insts : ['동우화인켐']).map(c => `<option ${c === inst0 ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  $('xd_date').value = (L[0] && L[0]['신청일']) || S.today; $('xd_name').value = s['물질명'] || '';
+  renderExDocs();
+}
+window.renderExDocs = () => {
+  const s = S.cur; S.exCo = $('xd_co').value || S.exCo;
+  const docs = exDocsFor(s, S.exCo), c = coOf(S.exCo) || {}, cu = custOf($('xd_inst').value) || {}, nm = $('xd_name').value.trim();
+  const warnFor = k => {
+    const w = [];
+    if (k === '연구개발용확인서') { if (!c['안전관리자']) w.push(`${S.exCo} 안전관리자`); ['안전관리자', '주소', '보관창고'].forEach(f => { if (!cu[f]) w.push(`${$('xd_inst').value} ${f}`); }); return w.length ? '거래처에 없음: ' + w.join(', ') : ''; }
+    if ((k === 'CAS미부여확인서' || k === '물질식별정보') && !nm) return '물질명 없음';
+    if (k === '물질식별정보' && !molOf(s)) return '구조 없음';
+    if (k === '단량체정보' && !s['단량체']) return '단량체 없음';
+    return '';
+  };
+  $('xd_rows').innerHTML = docs.length ? docs.map(d => { const w = warnFor(d.k), blocked = (d.k === '물질식별정보' && !molOf(s)) || (d.k === '단량체정보' && !s['단량체']);
+    return `<div class="docrow ${d.off ? 'off' : ''}" title="${d.off ? 'CAS가 있어 보통 필요 없음' : ''}"><b>${DOC_LABEL[d.k]}</b>${w ? `<span class="wmini">${esc(w)}</span>` : ''}<span class="sp"></span><span class="msg" id="xm_${d.k}"></span>
+      ${FMTB[d.f].map(([k, l]) => `<button class="sm ${k === 'orig' ? 'primary' : ''}" ${blocked ? 'disabled' : ''} onclick="exDocRun('${d.k}','${k}')">${l}</button>`).join('')}</div>`; }).join('')
+    : `<div class="docrow"><span class="dash">${esc(S.exCo)}은(는) 작성할 신고면제 서류가 없습니다</span></div>`;
+};
+window.exDocRun = async (k, fk) => {
+  const s = S.cur, co = S.exCo || '한인', c = coOf(co) || { 이름: co, 회사명: co }, inst = $('xd_inst').value, nm = $('xd_name').value.trim(), msg = 'xm_' + k;
+  flash(msg, fk === 'pdf' ? 'PDF 변환 중…' : '만드는 중…');
+  try {
+    if (k === '연구개발용확인서') {
+      const cu = custOf(inst) || { 회사명: inst }, T = await Docs.templates();
+      const v = { 제조자: c['안전관리자'] || '', 제조직위: c['안전관리자직위'] || '', 제조연락처: c['안전관리자연락처'] || '', 기관안전: cu['안전관리자'] || '', 기관직위: cu['안전관리자직위'] || '', 기관연락처: cu['안전관리자연락처'] || '',
+        주의_취급: setting('주의_취급', ''), 주의_저장: setting('주의_저장', ''), 주의_화재: setting('주의_화재', ''), 사후1: c['회사명'] || co, 사후2: cu['회사명'], 처리업체: setting('처리업체', ''), 운반업체: setting('운반업체', ''),
+        이송방법: setting('이송방법', '자차로 이송'), 수령주소: cu['주소'] || '', 보관창고: cu['보관창고'] || '', 운송업체: setting('운반업체', ''), 날짜: pointDate($('xd_date').value), 회사명: c['회사명'] || co, 대표: c['대표'] || '' };
+      await Docs.deliver(await Docs.buildRnd(v, c['직인'] || (co === '한인' ? T.stamp : null)), `${baseName(s)}_연구개발용화학물질확인서${inst !== '동우화인켐' ? '(' + Docs.safeName(inst) + ')' : ''}`, 'docx', fk);
+    } else if (k === 'CAS미부여확인서') {
+      if (!nm) throw new Error('물질명을 입력하세요.');
+      const v = { 물질명: nm, 회사명: c['회사명'] || co, 주소: c['주소'] || '', 사업자번호: c['사업자번호'] || '', 담당자: [c['부서'], c['담당자']].filter(Boolean).join(' '), 확인일: korDate($('xd_date').value || S.today) };
+      await Docs.deliver(await Docs.buildCasCert(v, molOf(s)), `${baseName(s)}_CAS미부여확인서${co !== '한인' ? '(' + Docs.safeName(co) + ')' : ''}`, 'docx', fk);
+    } else if (k === '물질식별정보') {
+      if (!nm) throw new Error('물질명을 입력하세요.');
+      const m = molOf(s); Docs.download(await Docs.buildIdPng(m, chemInfo(m).mw, nm), `${baseName(s)}_물질식별정보.png`);
+    } else if (k === '단량체정보') {
+      await Docs.deliver(await Docs.buildMonomerXlsx(s, parseMono(s['단량체']).map(x => ({ 물질명: x.name, CAS: x.cas }))), `${baseName(s)}_단량체정보`, 'xlsx', fk);
+    }
+    flash(msg, '✓');
+  } catch (e) { flash(msg, errMsg(e), false); }
+};
+// ----- 출고 탭 -----
+function neededDocs(x) {
+  const co = x['명의'], can = coDocs(co), need = x['필요서류'] != null && x['필요서류'] !== '' ? list(x['필요서류']) : defaultNeed(co, x['고객사']);
+  return need.filter(d => can.includes(d));
+}
+function defaultNeed(co, cust) { const c = custOf(cust); const base = c && c['필요서류'] ? list(c['필요서류']) : ['MSDS']; return base.filter(d => coDocs(co).includes(d)); }
+function renderShipCards(s) {
+  const L = shipsOf(s.id);
+  $('dShips').innerHTML = (S.detailNote ? `<div class="warn" style="margin:0 0 10px">${esc(S.detailNote)}</div>` : '') + (L.length ? L.map(x => {
+    const need = neededDocs(x), ex = x['고객사'] ? sampleEx(s.id, x['고객사']) : null, f = parseForm(x['제출형태']), co = coOf(x['명의']), valid = ex && ex.st.k === '유효';
+    const lsForm = (co && co['MSDS양식'] === '엘에스켐') || (!co && x['명의'] === '엘에스켐'), cust = custOf(x['고객사']) || {};
+    const self = need.includes('자진확인서') ? `<div class="docrow"><b>자진확인서</b>${valid ? '' : '<span class="wmini">유효한 면제번호 없음</span>'}<span class="sp"></span><span class="msg" id="sm_${x.id}"></span>
+        <button class="sm" onclick="toggleSelf('${x.id}')">편집</button>${FMTB.docx.map(([k, l]) => `<button class="sm ${k === 'orig' ? 'primary' : ''}" ${valid ? '' : 'disabled'} onclick="selfRun('${x.id}','${k}')">${l}</button>`).join('')}</div>
+      <div class="f selfed" id="se_${x.id}" style="display:none">
+        <div class="c3"><label>To.</label><input id="se_${x.id}_TO" value="${esc(cust['영문명'] || cust['회사명'] || x['고객사'] || '')}"></div>
+        <div class="c3"><label>물질명</label><input id="se_${x.id}_물질명" value="${esc((ex && ex.e['통지물질명']) || s['물질명'] || '')}"></div>
+        <div class="c2"><label>면제번호</label><input id="se_${x.id}_면제번호" value="${esc(valid ? ex.e['면제번호'] : '')}"></div>
+        <div class="c2"><label>취급최대수량(톤)</label><input id="se_${x.id}_수량" value="${esc(setting('자진확인서수량', '0.01'))}"></div>
+        <div class="c2"><label>함량(%)</label><input id="se_${x.id}_함량" value="${f && f.t === 'sol' ? f.p : 100}"></div></div>` : '';
+    const msds = need.includes('MSDS') ? `<div class="docrow"><b>MSDS${lsForm ? ' (엘에스켐 양식)' : ''}</b><span class="sp"></span><button class="sm primary" onclick="goMsdsShip('${x.id}')">작성</button></div>` : '';
+    const sub = need.length ? `<div class="docrow"><b>서류 제출</b>${x['서류제출일'] ? `<span class="b ok">${esc(x['서류제출일'])}</span>` : ''}<span class="sp"></span><span class="msg" id="sd_${x.id}"></span><input type="date" id="sdd_${x.id}" value="${esc(x['서류제출일'] || S.today)}" class="dsm"><button class="sm" onclick="saveSubmit('${x.id}')">저장</button></div>` : '';
+    return `<div class="scard"><div class="shead">${coBadge(x['명의'] || '?')}<b>${esc(x['고객사'] || '고객사 미입력')}</b>${x['고객사담당자'] ? `<span class="hint">${esc(x['고객사담당자'])}</span>` : ''}
+        <span class="hint">요청 ${dash(x['요청일'])}</span><span class="hint">${x['출고일'] ? '출고 ' + esc(x['출고일']) : '미출고'}</span><span class="hint">${esc(formText(f))}${x['수량'] ? ' · ' + esc(x['수량']) : ''}</span>
+        ${x['고객사'] ? (ex ? `<span class="b ${ex.st.cls}" title="${esc(x['고객사'])} 신고면제">${ex.st.txt}</span>` : '<span class="b etc">신고면제 없음</span>') : ''}<span class="sp"></span><button class="sm" onclick="openShip('${x.id}')">수정</button></div>
+      <div class="edit-only scdocs">${self}${msds}${sub}</div></div>`;
+  }).join('') : '<p class="empty">출고 기록 없음</p>');
+}
+window.toggleSelf = id => { const el = $('se_' + id); el.style.display = el.style.display === 'none' ? '' : 'none'; };
+window.selfRun = async (id, fk) => {
+  const s = S.cur, x = rows('출고').find(r => r.id === id), f = parseForm(x['제출형태']), g = k => $(`se_${id}_${k}`).value.trim(), msg = 'sm_' + id;
+  const v = { TO: g('TO'), 제품명: s['제품명'], 물질명: g('물질명'), 면제번호: g('면제번호'), 수량: g('수량'), 함량: g('함량'), 확인일: dotDate(S.today) };
+  if (!v.면제번호) { flash(msg, '면제번호 없음', false); return; }
+  flash(msg, fk === 'pdf' ? 'PDF 변환 중…' : '만드는 중…');
+  try { await Docs.deliver(await Docs.buildSelfCheck(v), `${baseName(s)}_자진확인서${formSuffix(f)}`, 'docx', fk); flash(msg, '✓'); } catch (e) { flash(msg, errMsg(e), false); }
+};
+window.saveSubmit = async id => {
+  const x = rows('출고').find(r => r.id === id), d = $('sdd_' + id).value;
+  try { const r = await call('saveShipment', Object.assign({}, x, { 서류제출일: d })); upsert('출고', r.ship); renderDetail(); render(); } catch (e) { flash('sd_' + id, errMsg(e), false); }
+};
+
+// ---------- 편집 모드 (계속 기억) ----------
+function setEditing(on) { document.body.classList.toggle('editing', on); if (on && !S.updChecked) { S.updChecked = true; setTimeout(() => checkUpd(false), 1500); } $('lockBtn').innerHTML = on ? '🔓 <span class="t">편집 중</span>' : '🔒 <span class="t">편집</span>'; }
+window.toggleEdit = () => {
+  if (S.pw) { S.pw = null; try { localStorage.removeItem('sm_pw'); } catch (e) {} setEditing(false); if (S.view === 'msds' || S.view === 'settings') { closeAllModals(); showView('list'); } else if ($('detail').classList.contains('open')) renderDetail(); return; }
+  $('pwErr').textContent = ''; openModal('pwBox'); setTimeout(() => $('pwIn').focus(), 50);
+};
+window.submitPw = async () => {
+  const pw = $('pwIn').value, ok = await call('verifyPassword', pw).catch(() => false);
+  if (!ok) { $('pwErr').textContent = '비밀번호가 맞지 않습니다.'; return; }
+  S.pw = pw; try { localStorage.setItem('sm_pw', JSON.stringify({ pw })); } catch (e) {}
+  $('pwIn').value = ''; closeModal('pwBox'); setEditing(true);
+};
+async function restorePw() {
+  try { const v = JSON.parse(localStorage.getItem('sm_pw') || 'null'); if (v && v.pw) { S.pw = v.pw; setEditing(true);
+    const ok = await call('verifyPassword', v.pw).catch(() => true); if (!ok) { S.pw = null; localStorage.removeItem('sm_pw'); setEditing(false); } } } catch (e) {}
+}
+
+// ---------- 구조 검색 ----------
+window.toggleStruct = async () => {
+  const p = $('structPanel'); p.classList.toggle('open');
+  if (p.classList.contains('open') && !S.qEditor) { await loadOCL(); S.qEditor = new MolEditor($('qEditor'), { fragment: true }); }
+};
+window.applyPaste = (taId, editor) => {
+  const ta = $(taId);
+  try { const m = parseText(ta.value); if (!m) return; editor.setMolecule(m); ta.value = ''; }
+  catch (e) { alert('구조를 읽지 못했습니다. ' + (e.message || '')); }
+};
+document.addEventListener('paste', e => {
+  const txt = (e.clipboardData || window.clipboardData).getData('text');
+  const target = $('monoBox').classList.contains('open') ? S.mEditor : $('form').classList.contains('open') ? S.fEditor : ($('structPanel').classList.contains('open') && S.view === 'list' ? S.qEditor : null);
+  if (!target || !txt || /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  try { const m = parseText(txt); if (!m) return; e.preventDefault(); e.stopPropagation(); target.setMolecule(m); }
+  catch (err) { alert('붙여넣은 내용을 구조로 읽지 못했습니다. ' + (err.message || '')); }
+}, true);
+window.runStruct = () => {
+  if (S.qEditor.isEmpty()) { alert('찾을 구조를 그리거나 붙여넣어 주세요.'); return; }
+  const qm = S.qEditor.getMolecule(), skel = $('skel').checked, mode = segVal('smode') || 'sub';
+  const hits = new Map();
+  if (mode === 'sub') {
+    const frag = prepQuery(qm, skel), ss = new S.OCL.SSSearcher(); ss.setFragment(frag);
+    const test = m => { ss.setMolecule(m); return ss.findFragmentInMolecule({ countMode: 'firstMatch' }) > 0; };
+    S.samples.forEach(s => {
+      const m = molOf(s);
+      if (m) { if (test(m)) hits.set(s.id, { match: ss.getMatchList()[0] || [] }); return; }
+      const { mono, mod } = polyParts(s);
+      if ([...mono, ...mod].some(x => { const mm = monoMol(x); return mm && test(mm); })) hits.set(s.id, { mono: true });
+    });
+  } else {
+    const full = qm.getCompactCopy(); full.setFragment(false);
+    if (mode === 'exact') { const code = full.getIDCode(); S.samples.forEach(s => { const m = molOf(s); if (m && m.getIDCode() === code) hits.set(s.id, {}); }); }
+    else { const qi = full.getIndex(); S.samples.forEach(s => { const m = molOf(s); if (!m) return;
+      const idx = s['검색값'] ? s['검색값'].split(',').map(Number) : m.getIndex(), na = full.getAtoms(), nb = m.getAtoms();
+      const sc = S.OCL.SSSearcherWithIndex.getSimilarityTanimoto(qi, idx) * Math.min(na, nb) / Math.max(na, nb);
+      if (sc >= 0.3) hits.set(s.id, { score: sc }); }); }
+  }
+  S.hits = hits; S.hitMode = mode; render();
+  $('zeroHint').style.display = mode === 'sub' && !skel && hits.size === 0 ? 'flex' : 'none';
+};
+window.clearStruct = () => { if (S.qEditor) S.qEditor.clearAll(); S.hits = null; $('zeroHint').style.display = 'none'; render(); };
+
+// ---------- 샘플 등록·수정 ----------
+window.openForm = async id => {
+  await loadOCL();
+  S.editing = id ? S.samples.find(x => x.id === id) : null;
+  const s = S.editing || {};
+  $('fTitle').textContent = S.editing ? `샘플 수정 — ${s['제품명']}` : '샘플 등록';
+  ['제품명', '물질명', 'CAS', '고객사', '성상', '용도', '비고'].forEach(k => $('f_' + k).value = s[k] || '');
+  const N = coNames();
+  seg('f_관리회사', [...N, '기타'], [s['관리회사'] || (N.includes(S.tab) ? S.tab : '한인')], 'radio', true);
+  $('etcDl').innerHTML = etcNames().map(n => `<option value="${esc(n)}">`).join('');
+  $('f_기타회사').value = s['기타회사'] || ''; const syncEtc = () => { $('f_기타회사').style.display = segVal('f_관리회사') === '기타' ? '' : 'none'; };
+  $('f_관리회사').onchange = syncEtc; syncEtc();
+  $('f_관리번호').textContent = s['관리번호'] || '저장하면 자동';
+  const nm = namesOf(s); seg('f_명의', [...N, ...nm.filter(x => !N.includes(x))], nm, 'checkbox', true);
+  seg('f_종류', KINDS, S.editing ? kindsOf(s) : (S.kind !== '전체' ? [S.kind] : []), 'checkbox');
+  $('fWarn').innerHTML = ''; $('fWarn').dataset.ack = ''; $('fPaste').value = ''; $('pcBox').innerHTML = ''; S.pcLast = null;
+  S.fMono = parseMono(s['단량체']); S.fMod = parseMod(s['개질']); S.mainEdForced = false;
+  openModal('form');
+  if (!S.fEditor) S.fEditor = new MolEditor($('fEditor'), { onChange: () => { updateCalc(); schedulePubChem(); } });
+  const m = S.editing && molOf(S.editing);
+  S.fEditor.clearAll(); if (m) { S.fEditor.setMolecule(m.getCompactCopy()); S.fEditor.undoStack = []; }
+  $('f_종류').onchange = () => { renderPoly(); syncStructBox(); };
+  renderPoly(); syncStructBox(); updateCalc();
+  if (m) schedulePubChem(10);
+};
+function isPolyForm() { return segVals('f_종류').includes('고분자'); }
+function syncStructBox() {
+  const poly = isPolyForm(), hasMol = S.fEditor && !S.fEditor.isEmpty();
+  const hide = poly && !hasMol && !S.mainEdForced;
+  $('mainEd').style.display = hide ? 'none' : ''; $('polyStructNote').style.display = hide ? '' : 'none';
+  if (!hide && S.fEditor) setTimeout(() => S.fEditor.redraw(), 0);
+}
+window.showMainEditor = () => { S.mainEdForced = true; syncStructBox(); setTimeout(() => { S.fEditor.fit(); S.fEditor.redraw(); }, 30); };
+function formMol() { return S.fEditor && !S.fEditor.isEmpty() ? S.fEditor.getMolecule() : null; }
+function updateCalc() {
+  const m = formMol();
+  if (!m) { $('fCalc').textContent = ''; $('ionBox').innerHTML = ''; return; }
+  const c = chemInfo(m); $('fCalc').textContent = `${c.formula} · ${c.mw}`;
+  $('ionBox').innerHTML = ionHtml(m, 'balanceIons()');
+}
+window.balanceIons = () => { const b = balanced(formMol()); if (b) S.fEditor.setMolecule(b); };
+
+// PubChem 자동 조회
+let pcTimer = null;
+function schedulePubChem(delay = 1500) { clearTimeout(pcTimer); pcTimer = setTimeout(() => runPubChem(formMol(), 'pcBox', 'f_CAS', 'f_물질명', 'pcLast'), delay); }
+async function runPubChem(m, boxId, casId, nameId, key) {
+  const box = $(boxId); if (!m) { box.innerHTML = ''; return; }
+  const smi = smilesOf(m); if (!smi || smi === S[key]) return; S[key] = smi;
+  box.innerHTML = '<span class="hint">PubChem에서 CAS 번호 찾는 중…</span>';
+  const p = ionParts(m), out = [];
+  try {
+    const r = await call('lookupPubChem', { smiles: smi }); if (S[key] !== smi) return;
+    out.push(pcLine(p.multi ? '전체(염)' : '', r, true, casId, nameId));
+    if (p.multi && !r.cas.length) for (const g of p.list) { const ri = await call('lookupPubChem', { smiles: g.smi }); out.push(pcLine((g.q > 0 ? '양이온' : g.q < 0 ? '음이온' : '조각') + ' ' + g.formula, ri, false, casId, nameId)); }
+    if (S[key] === smi) box.innerHTML = out.join('');
+  } catch (e) { box.innerHTML = '<span class="hint">PubChem에 연결하지 못했습니다.</span>'; }
+}
+function pcLine(label, r, main, casId, nameId) {
+  const lab = label ? `<b>${esc(label)}</b> ` : '';
+  if (!r.found && !r.cas.length) return `<div>${lab}PubChem에 등록되지 않은 구조</div>`;
+  const cas = r.cas.length ? r.cas.map(c => `CAS <b>${esc(c)}</b> <button class="sm" onclick="putVal('${casId}','${esc(c)}')">CAS에 넣기</button>`).join(' ') : 'PubChem에 등록된 CAS 없음';
+  const names = (r.names && r.names.length ? r.names : (r.iupac ? [r.iupac] : []));
+  const nm = main && names.length ? `<br>추천 이름: ${names.map(n => `<button class="sm" style="margin:2px 2px 0 0" title="물질명에 넣기" onclick="putVal('${nameId}', this.dataset.v)" data-v="${esc(n)}">${esc(n.length > 70 ? n.slice(0, 67) + '…' : n)}</button>`).join('')}` : (main ? '<br><span class="hint">추천 이름 없음</span>' : '');
+  return `<div>${lab}${cas}${!main && r.cas.length ? ' <span class="hint">(이온 CAS — 염 전체 CAS 아님)</span>' : ''}${nm}</div>`;
+}
+window.putVal = (id, v) => { $(id).value = v; };
+
+// 고분자: 단량체·개질
+function monoRowHtml(m, i, role) {
+  const mol = monoMol(m);
+  return `<div class="mrow"><div class="thumb" onclick="openMono('${role}',${i})" title="구조 그리기">${mol ? svgOf(mol, 86, 58) : '구조 그리기'}</div>
+    <input list="monoDl" placeholder="약어 (예: EHA)" value="${esc(m.abbr)}" oninput="monoSet('${role}',${i},'abbr',this.value)">
+    <input placeholder="물질명" value="${esc(m.name)}" oninput="monoSet('${role}',${i},'name',this.value)">
+    <input placeholder="CAS" value="${esc(m.cas)}" oninput="monoSet('${role}',${i},'cas',this.value)">
+    <button class="sm" onclick="monoDel('${role}',${i})">삭제</button></div>`;
+}
+function renderPoly() {
+  const on = isPolyForm(); $('polyBox').style.display = on ? '' : 'none'; if (!on) return;
+  if (!S.fMono.length) S.fMono.push({ abbr: '', name: '', cas: '' });
+  $('monoDl').innerHTML = rows('단량체').map(d => `<option value="${esc(d['약어'])}">${esc(d['물질명'])}</option>`).join('');
+  $('monoRows').innerHTML = S.fMono.map((m, i) => monoRowHtml(m, i, 'mono')).join('');
+  const md = S.fMod;
+  $('modBase').innerHTML = '<option value="">위 단량체로 만든 고분자</option>' + S.samples.filter(x => kindsOf(x).includes('고분자') && (!S.editing || x.id !== S.editing.id)).map(x => `<option value="${x.id}" ${md.기반 === x.id ? 'selected' : ''}>${esc(x['관리번호'] || '')} ${esc(x['제품명'])}</option>`).join('');
+  seg('modType', MOD_TYPES, [md.방식 || '없음'], 'radio');
+  $('modType').onchange = () => { modChange(); renderModRows(); };
+  renderModRows(); polyCandidates();
+}
+function renderModRows() {
+  const on = (S.fMod.방식 || '없음') !== '없음';
+  if (on && !S.fMod.물질.length) S.fMod.물질.push({ abbr: '', name: '', cas: '' });
+  $('modRows').innerHTML = on ? S.fMod.물질.map((m, i) => monoRowHtml(m, i, 'mod')).join('') : '';
+  $('modAddBtn').style.display = on ? '' : 'none';
+}
+const listOf = role => role === 'mod' ? S.fMod.물질 : S.fMono;
+window.monoSet = (role, i, k, v) => {
+  const L = listOf(role); L[i][k] = v;
+  if (k === 'abbr') { const d = dictFind({ abbr: v }); if (d) { L[i].name = d['물질명']; L[i].cas = d['CAS']; delete L[i].idcode; role === 'mod' ? renderModRows() : renderPoly(); const el = document.querySelectorAll(`#${role === 'mod' ? 'modRows' : 'monoRows'} .mrow`)[i]; const inp = el && el.querySelectorAll('input')[0]; if (inp) { inp.focus(); inp.setSelectionRange(v.length, v.length); } return; } }
+  polyCandidates();
+};
+window.monoDel = (role, i) => { listOf(role).splice(i, 1); role === 'mod' ? renderModRows() : renderPoly(); polyCandidates(); };
+window.monoAdd = role => { listOf(role).push({ abbr: '', name: '', cas: '' }); role === 'mod' ? renderModRows() : renderPoly(); };
+window.modChange = () => { S.fMod.방식 = segVal('modType') || '없음'; S.fMod.기반 = $('modBase').value; polyCandidates(); };
+const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+function polyName(monos) { const n = monos.filter(m => m.name || m.abbr).map(m => m.name || m.abbr); return !n.length ? '' : n.length === 1 ? `Poly(${n[0]})` : `Poly(${n.join('-co-')})`; }
+window.makePolyName = () => {
+  modChange(); const md = S.fMod;
+  const base = md.기반 ? (S.samples.find(x => x.id === md.기반) || {})['물질명'] || '' : polyName(S.fMono);
+  if (!base) { alert('단량체를 입력하거나 기반 고분자를 고르세요.'); return; }
+  const X = md.물질.filter(m => m.name || m.abbr).map(m => m.name || m.abbr).join(' and ');
+  if (md.방식 !== '없음' && !X) { alert('붙이는 물질을 입력하세요.'); return; }
+  $('f_물질명').value = md.방식 === '말단개질' ? `${X}-terminated ${base}` : md.방식 === '그래프트' ? `${base}-graft-${X}` : md.방식 === '반응생성물' ? `${base}, reaction products with ${X}` : md.방식 === '개질' ? `${cap(X)}-modified ${base}` : base;
+};
+const keyOf = L => L.map(m => (m.cas || m.name || m.abbr || '').trim().toLowerCase()).filter(Boolean).sort().join('|');
+const polyKey = (mono, md) => keyOf(mono) + '#' + ((md.방식 && md.방식 !== '없음') ? md.방식 + ':' + keyOf(md.물질) : '');
+function polyCandidates() {
+  const el = $('polyCas'); if (!keyOf(S.fMono)) { el.innerHTML = ''; return; }
+  const key = polyKey(S.fMono, S.fMod);
+  const same = S.samples.filter(x => (!S.editing || x.id !== S.editing.id) && x['단량체'] && polyKey(parseMono(x['단량체']), parseMod(x['개질'])) === key);
+  el.innerHTML = (same.length ? '같은 조성(비율 무관): ' + same.map(x => `${esc(x['관리번호'] || '')} ${esc(x['제품명'])}${x.CAS ? ` — CAS <b>${esc(x.CAS)}</b> <button class="sm" onclick="putVal('f_CAS','${esc(x.CAS)}')">CAS에 넣기</button>` : ''}`).join(' · ') : '같은 조성으로 등록된 샘플 없음') +
+    (S.fMono.filter(m => m.name).length === 1 && (S.fMod.방식 || '없음') === '없음' ? ` · <button class="sm" onclick="polyPubChem()">단독중합체 PubChem 검색</button><span id="polyPc"></span>` : '');
+}
+window.polyPubChem = async () => {
+  const o = $('polyPc'); o.textContent = ' 찾는 중…';
+  try { const r = await call('lookupPubChem', { name: polyName(S.fMono) }); o.innerHTML = ' ' + (r.cas.length ? r.cas.map(c => `<b>${esc(c)}</b> <button class="sm" onclick="putVal('f_CAS','${esc(c)}')">CAS에 넣기</button>`).join(' ') : 'PubChem에 등록된 CAS 없음'); }
+  catch (e) { o.textContent = ' PubChem에 연결하지 못했습니다.'; }
+};
+
+// 단량체 구조 창
+window.openMono = async (role, i) => {
+  await loadOCL();
+  const m = role === 'dict' ? (() => { const d = rows('단량체').find(x => x.id === i) || {}; return { abbr: d['약어'] || '', name: d['물질명'] || '', cas: d['CAS'] || '', idcode: d.idcode, coords: d['좌표'] }; })() : listOf(role)[i];
+  S.mbTarget = { role, i };
+  $('mbTitle').textContent = role === 'mod' ? '붙이는 물질 구조' : '단량체 구조';
+  $('mb_abbr').value = m.abbr || ''; $('mb_name').value = m.name || ''; $('mb_cas').value = m.cas || ''; $('mbPaste').value = ''; $('mbPc').innerHTML = ''; S.mbLast = null;
+  openModal('monoBox');
+  if (!S.mEditor) S.mEditor = new MolEditor($('mEditor'), { onChange: () => { mbCalc(); clearTimeout(S.mbT); S.mbT = setTimeout(() => runPubChem(S.mEditor.isEmpty() ? null : S.mEditor.getMolecule(), 'mbPc', 'mb_cas', 'mb_name', 'mbLast'), 1500); } });
+  S.mEditor.clearAll(); const mol = monoMol(m); if (mol) { S.mEditor.setMolecule(mol.getCompactCopy()); S.mEditor.undoStack = []; }
+  mbCalc();
+};
+function mbCalc() { const e = S.mEditor; if (e.isEmpty()) { $('mbCalc').textContent = ''; $('mbIon').innerHTML = ''; return; } const m = e.getMolecule(), c = chemInfo(m); $('mbCalc').textContent = `${c.formula} · ${c.mw}`; $('mbIon').innerHTML = ionHtml(m, 'mbBalance()'); }
+window.mbBalance = () => { const b = balanced(S.mEditor.getMolecule()); if (b) S.mEditor.setMolecule(b); };
+window.monoClearStruct = () => { S.mEditor.clearAll(); mbCalc(); };
+async function upsertDict(m) {
+  if (!S.pw || !(m.abbr || m.name)) return null;
+  const d = Object.assign({}, dictFind(m) || {});
+  d['약어'] = m.abbr || d['약어'] || m.name; d['물질명'] = m.name || d['물질명'] || ''; d['CAS'] = m.cas || d['CAS'] || '';
+  if (m.idcode !== undefined) { d.idcode = m.idcode || ''; d['좌표'] = m.coords || ''; }
+  const r = await save('단량체', d); delete S.dmols[r.id]; return r;
+}
+window.monoApply = async () => {
+  const e = S.mEditor, info = e.isEmpty() ? null : chemInfo(e.getMolecule());
+  const m = { abbr: $('mb_abbr').value.trim(), name: $('mb_name').value.trim(), cas: $('mb_cas').value.trim(), idcode: info ? info.idcode : '', coords: info ? info.coords : '' };
+  const { role, i } = S.mbTarget;
+  try {
+    if (role === 'dict') { const d = Object.assign({}, rows('단량체').find(x => x.id === i) || {}); Object.assign(d, { 약어: m.abbr || m.name, 물질명: m.name, CAS: m.cas, idcode: m.idcode, 좌표: m.coords }); const r = await save('단량체', d); delete S.dmols[r.id]; closeModal('monoBox'); renderSettings(); return; }
+    const L = listOf(role); Object.assign(L[i], m);
+    await upsertDict(m).catch(() => null);
+    closeModal('monoBox'); role === 'mod' ? renderModRows() : renderPoly(); polyCandidates();
+  } catch (er) { alert('저장하지 못했습니다: ' + ((er && er.message) || er)); }
+};
+
+function duplicates(obj, info) {
+  const w = [], others = S.samples.filter(s => !S.editing || s.id !== S.editing.id);
+  const sameName = others.find(s => s['제품명'].trim().toLowerCase() === obj['제품명'].trim().toLowerCase());
+  if (sameName) w.push(`같은 제품명 <b>${esc(sameName['제품명'])}</b>(${esc(sameName['관리번호'] || '')})이 이미 있습니다.`);
+  if (info) { const code = S.OCL.Molecule.fromIDCode(info.idcode).getIDCode(); const sameMol = others.find(s => { const m = molOf(s); return m && m.getIDCode() === code; });
+    if (sameMol) w.push(`같은 구조가 <b>${esc(sameMol['제품명'])}</b>(${esc(sameMol['관리번호'] || '')})로 이미 등록되어 있습니다.`); }
+  const cas = (obj.CAS || '').trim();
+  if (cas) { const sameCas = others.find(s => (s.CAS || '').split(/[,\s]+/).includes(cas)); if (sameCas) w.push(`CAS ${esc(cas)}가 <b>${esc(sameCas['제품명'])}</b>에도 쓰였습니다.`); }
+  return w;
+}
+window.saveForm = async () => {
+  const obj = Object.assign({}, S.editing || {});
+  ['제품명', '물질명', 'CAS', '고객사', '성상', '용도', '비고'].forEach(k => obj[k] = $('f_' + k).value.trim());
+  obj['명의'] = segVals('f_명의').join(','); obj['종류'] = segVals('f_종류').join(',');
+  obj['관리회사'] = segVal('f_관리회사'); obj['기타회사'] = obj['관리회사'] === '기타' ? $('f_기타회사').value.trim() : '';
+  if (obj['관리회사'] === '기타' && !obj['기타회사']) { alert('기타 회사 이름을 입력하세요.'); return; }
+  if (obj['관리회사'] === '기타' && !obj['명의'].split(',').includes(obj['기타회사'])) obj['명의'] = [obj['명의'], obj['기타회사']].filter(Boolean).join(',');
+  if (S.editing && S.editing['관리회사'] !== obj['관리회사'] && !(S.editing['관리회사'] === '기타' && obj['관리회사'] === S.editing['기타회사'])) obj['관리번호'] = '';
+  if (!obj['제품명']) { alert('제품명을 입력하세요.'); return; }
+  if (!obj['관리회사']) { alert('관리회사를 고르세요.'); return; }
+  if (obj['종류'].includes('고분자')) { modChange(); obj['단량체'] = fmtMono(S.fMono); const md = S.fMod; obj['개질'] = (md.방식 && md.방식 !== '없음') || md.기반 ? JSON.stringify({ 방식: md.방식, 기반: md.기반, 물질: md.물질.filter(x => x.name || x.abbr).map(x => ({ abbr: x.abbr, name: x.name, cas: x.cas })) }) : ''; }
+  const m = formMol(); let info = null;
+  if (m) { info = chemInfo(m); Object.assign(obj, { idcode: info.idcode, 좌표: info.coords, 검색값: info.index, 분자식: info.formula, 분자량: obj['종류'].includes('고분자') ? '' : info.mw }); }
+  else Object.assign(obj, { idcode: '', 좌표: '', 검색값: '' });
+  const vb = m && S.fEditor.valenceIssues ? [...new Set(S.fEditor.valenceIssues().values())] : [];
+  const warns = [...vb.map(x => '구조: ' + x), ...(m ? checkMol(m) : []), ...duplicates(obj, info)];
+  const wEl = $('fWarn');
+  if (warns.length && wEl.dataset.ack !== JSON.stringify(warns)) { wEl.innerHTML = warns.map(x => '⚠ ' + x).join('<br>') + '<br><b>그래도 저장하려면 저장을 한 번 더 누르세요.</b>'; wEl.dataset.ack = JSON.stringify(warns); return; }
+  const btn = $('fSave'); btn.disabled = true; btn.textContent = '저장 중…';
+  try { const saved = await save('샘플', obj); delete S.mols[saved.id]; wEl.dataset.ack = ''; closeModal('form'); render(); }
+  catch (e) { wEl.innerHTML = '저장하지 못했습니다: ' + errMsg(e); }
+  finally { btn.disabled = false; btn.textContent = '저장'; }
+};
+
+// ---------- 출고 (조회 모드에서도 입력) ----------
+function solvEditor(boxId, F, onchg) {
+  // F: {t:'sol', p, s:[{k,p}]} 를 직접 고침
+  const used = new Set(F.s.map(c => c.k));
+  $(boxId).innerHTML = `<div class="row" style="margin:0 0 8px"><span>용질(제품) 함량</span><input type="number" step="any" value="${F.p}" style="width:90px;height:34px;border:1px solid #cfd6de;border-radius:8px;padding:0 8px;text-align:right" oninput="${onchg}.F.p=+this.value;${onchg}.sum()"> %</div>
+    <div class="solvbtns">${Docs.SOLV_ORDER.map(k => `<button ${used.has(k) ? 'disabled' : ''} onclick="${onchg}.add('${k}')">+ ${SOLV_SHORT[k]}</button>`).join('')}</div>
+    ${F.s.map((c, i) => `<div class="srow"><div><b>${esc(Docs.SOLV[c.k].name)}</b> <span class="hint">${esc(Docs.SOLV[c.k].ko)}</span></div>
+      <div class="pct"><input type="number" step="any" value="${c.p}" oninput="${onchg}.F.s[${i}].p=+this.value;${onchg}.sum()"> %</div><button class="sm" onclick="${onchg}.F.s.splice(${i},1);${onchg}.draw()">삭제</button></div>`).join('') || '<p class="empty">용매 없음</p>'}
+    <div class="sumtxt" id="${boxId}_sum"></div>`;
+}
+function addSolvTo(F, key) {
+  if (F.s.some(c => c.k === key)) return;
+  const sum = (+F.p || 0) + F.s.reduce((a, c) => a + (+c.p || 0), 0); let give = +(100 - sum).toFixed(2);
+  if (give <= 0) { const big = F.s.length ? F.s.reduce((a, c) => (+c.p > +a.p ? c : a)) : null;
+    if (big && +big.p >= (+F.p || 0)) { give = +(big.p / 2).toFixed(2); big.p = +(big.p - give).toFixed(2); } else { give = +((+F.p || 0) / 2).toFixed(2); F.p = +((+F.p || 0) - give).toFixed(2); } }
+  F.s.push({ k: key, p: give });
+}
+window.SF = { F: null, add(k) { addSolvTo(this.F, k); this.draw(); }, draw() { solvEditor('s_형태칸', this.F, 'SF'); this.sum(); },
+  sum() { const t = +((+this.F.p || 0) + this.F.s.reduce((a, c) => a + (+c.p || 0), 0)).toFixed(2), el = $('s_형태칸_sum'); if (el) el.innerHTML = Math.abs(t - 100) < 0.01 ? '<span class="msg ok">합계 100% ✓</span>' : `<span class="msg bad">합계 ${t}%</span>`; } };
+window.shipFormRender = () => {
+  const sol = segVal('s_형태') === '용액·혼합물';
+  if (!sol) { $('s_형태칸').innerHTML = '<span class="hint">함량 100%</span>'; return; }
+  if (!SF.F || SF.F.t !== 'sol') SF.F = { t: 'sol', p: 100, s: [] };
+  SF.draw();
+};
+function shipContacts(cust) { const c = custOf(cust); $('contactDl').innerHTML = (c ? list(c['담당자']) : []).map(n => `<option value="${esc(n)}">`).join(''); }
+window.shipCustChanged = () => { shipContacts($('s_고객사').value.trim()); if (!S.ship.id) shipNeedDefault(); };
+function shipCo() { const v = segVal('s_명의'); return v === '기타' ? $('s_기타').value.trim() : v; }
+function shipNeedDefault() { const need = defaultNeed(shipCo(), $('s_고객사').value.trim()); document.querySelectorAll('input[name=s_필요서류]').forEach(c => c.checked = need.includes(c.value)); }
+window.openShip = (id, copy) => {
+  const s = S.cur; let x = id ? rows('출고').find(r => r.id === id) : null;
+  if (!x) { const prev = copy ? shipsOf(s.id)[0] : null;
+    if (copy && !prev) { alert('복사할 이전 출고 건이 없습니다.'); return; }
+    x = prev ? { 명의: prev['명의'], 고객사: prev['고객사'], 고객사담당자: prev['고객사담당자'], 요청내용: prev['요청내용'], 수량: prev['수량'], 제출형태: prev['제출형태'], 필요서류: prev['필요서류'] }
+      : { 명의: namesOf(s)[0] || companyOf(s) || '한인', 고객사: '동우화인켐', 제출형태: JSON.stringify(legacyForm(s) || { t: 'neat' }) };
+    x.요청일 = S.today; }
+  S.ship = x; const N = coNames(), isEtc = x['명의'] && !N.includes(x['명의']);
+  $('custDl').innerHTML = rows('고객사').map(c => `<option value="${esc(c['회사명'])}">`).join('');
+  $('etcDl').innerHTML = etcNames().map(n => `<option value="${esc(n)}">`).join('');
+  $('sTitle').textContent = `${x.id ? '출고 수정' : '출고 등록'} — ${s['제품명']}`;
+  seg('s_명의', [...N, '기타'], [isEtc ? '기타' : x['명의']], 'radio', true);
+  $('s_기타').value = isEtc ? x['명의'] : ''; const syncEtc = () => { $('s_기타').style.display = segVal('s_명의') === '기타' ? '' : 'none'; };
+  $('s_명의').onchange = () => { syncEtc(); if (!S.ship.id) shipNeedDefault(); }; $('s_기타').oninput = () => { if (!S.ship.id) shipNeedDefault(); };
+  ['고객사', '고객사담당자', '요청일', '요청내용', '수량', '출고일', '서류제출일', '비고'].forEach(k => $('s_' + k).value = x[k] || '');
+  shipContacts(x['고객사']);
+  const f = parseForm(x['제출형태']) || { t: 'neat' }; SF.F = f.t === 'sol' ? JSON.parse(JSON.stringify(f)) : null;
+  seg('s_형태', ['물질 그대로', '용액·혼합물'], [f.t === 'sol' ? '용액·혼합물' : '물질 그대로'], 'radio'); shipFormRender();
+  $('s_필요서류').innerHTML = SUB_DOCS.map(d => `<label><input type="checkbox" name="s_필요서류" value="${d}">${DOC_LABEL[d]}</label>`).join('');
+  syncEtc();
+  if (x.id || x['필요서류']) { const need = list(x['필요서류']); document.querySelectorAll('input[name=s_필요서류]').forEach(c => c.checked = need.includes(c.value)); }
+  else shipNeedDefault();
+  $('sDel').style.visibility = x.id ? '' : 'hidden'; $('sMsg').textContent = '';
+  openModal('shipBox');
+};
+window.saveShip = async () => {
+  const s = S.cur, x = Object.assign({}, S.ship);
+  x['샘플id'] = s.id; x['제품명'] = s['제품명']; x['명의'] = shipCo();
+  ['고객사', '고객사담당자', '요청일', '요청내용', '수량', '출고일', '서류제출일', '비고'].forEach(k => x[k] = $('s_' + k).value.trim());
+  const sol = segVal('s_형태') === '용액·혼합물';
+  const f = sol ? SF.F : { t: 'neat' };
+  if (sol && !f.s.length) { flash('sMsg', '용매를 추가하거나 "물질 그대로"를 고르세요.', false); return; }
+  x['제출형태'] = JSON.stringify(f); x['함량'] = sol ? String(f.p) : '100';
+  x['필요서류'] = segVals('s_필요서류').join(','); delete x['체크'];
+  if (!x['명의']) { flash('sMsg', '출고사를 고르세요.', false); return; }
+  try {
+    if (x['고객사'] && !custOf(x['고객사']) && S.pw && confirm(`"${x['고객사']}"는 거래처에 없는 고객사입니다. 고객사로 추가할까요?\n(일회성이면 [취소] — 이 출고 건에만 이름이 남습니다)`))
+      await save('고객사', { 회사명: x['고객사'], 담당자: x['고객사담당자'] || '', 필요서류: x['필요서류'] || 'MSDS' });
+    const r = await call('saveShipment', x); upsert('출고', r.ship);
+    if (r.sample) { upsert('샘플', r.sample); S.cur = r.sample; }
+    closeModal('shipBox'); setTimeout(() => { showDetail(s.id, false, 'ship'); render(); }, 380);
+  } catch (e) { flash('sMsg', '저장하지 못했습니다: ' + errMsg(e), false); }
+};
+window.delShip = async () => { if (!confirm('이 출고 기록을 지울까요?')) return; await remove('출고', S.ship.id); closeModal('shipBox'); setTimeout(() => showDetail(S.cur.id, false, 'ship'), 380); };
+
+// ---------- 신고면제 ----------
+const EX_KEYS = ['신청일', '기간시작', '기간종료', '통지일', '면제번호', '결과', '사유', '통지물질명', '통지CAS', '연간제조량', '비고'];
+window.openEx = id => {
+  const s = S.cur, e = id ? rows('신고면제').find(r => r.id === id) : { 신청일: S.today, 기관: '동우화인켐', 신청회사: S.exCo || '한인' };
+  S.exRec = e; $('eTitle').textContent = `신고면제 — ${s['제품명']}`;
+  EX_KEYS.forEach(k => $('e_' + k).value = e[k] || '');
+  const insts = [...new Set([...rows('고객사').map(c => c['회사명']), e['기관'] || '동우화인켐'])];
+  $('e_기관').innerHTML = insts.map(n => `<option ${n === (e['기관'] || '동우화인켐') ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const cos = [...new Set([...coNames(), e['신청회사'] || '한인'])];
+  $('e_신청회사').innerHTML = cos.map(n => `<option ${n === (e['신청회사'] || '한인') ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  if (!e.id) exDates();
+  $('eWarn').innerHTML = ''; $('eWarn').className = 'warn'; $('eFile').value = ''; $('eCopied').textContent = ''; $('eDel').style.visibility = e.id ? '' : 'hidden';
+  openModal('exBox');
+};
+window.exDates = () => { const d = $('e_신청일').value; $('e_기간시작').value = d; $('e_기간종료').value = yearEnd(d); };
+window.copyPeriod = () => {
+  const t = `${$('e_기간시작').value} ~ ${$('e_기간종료').value}`;
+  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { $('eCopied').textContent = '복사됨: ' + t; }, () => { prompt('복사해서 쓰세요', t); });
+};
+const norm = t => String(t || '').toLowerCase().replace(/[\s\-_,()[\]{}'"]/g, '');
+window.readNoticeFile = async inp => {
+  const f = inp.files[0]; if (!f) return; const w = $('eWarn');
+  w.className = 'warn'; w.textContent = '통지서 읽는 중… (파일은 저장되지 않습니다)';
+  try {
+    const r = await Docs.readNotice(f), s = S.cur, msgs = [];
+    ['면제번호', '통지일', '결과', '사유', '연간제조량'].forEach(k => { if (r[k]) $('e_' + k).value = r[k]; });
+    if (r.물질명) $('e_통지물질명').value = r.물질명; if (r.CAS) $('e_통지CAS').value = r.CAS;
+    if (!r.면제번호) msgs.push('면제확인번호를 찾지 못했습니다. 직접 입력하세요.');
+    if (r.물질명 && s['물질명'] && norm(r.물질명) !== norm(s['물질명'])) msgs.push(`통지서 물질명이 샘플 물질명과 다릅니다.<br>· 통지서: ${esc(r.물질명)}<br>· 샘플: ${esc(s['물질명'])}`);
+    if (r.CAS && s.CAS && !s.CAS.includes(r.CAS)) msgs.push(`통지서 CAS ${esc(r.CAS)}가 샘플 CAS ${esc(s.CAS)}와 다릅니다.`);
+    if (r.결과 === '비대상') msgs.push('결과가 <b>비대상</b>입니다. 사유를 확인하세요.');
+    w.innerHTML = msgs.length ? msgs.map(x => '⚠ ' + x).join('<br>') : '✓ 통지서 내용을 채웠습니다.';
+  } catch (e) { w.className = 'warn err'; w.textContent = '통지서를 읽지 못했습니다: ' + ((e && e.message) || e); }
+};
+window.saveEx = async () => {
+  const s = S.cur, e = Object.assign({}, S.exRec), before = S.exRec['면제번호'];
+  e['샘플id'] = s.id; e['제품명'] = s['제품명']; e['기관'] = $('e_기관').value; e['신청회사'] = $('e_신청회사').value;
+  EX_KEYS.forEach(k => e[k] = $('e_' + k).value.trim());
+  try {
+    await save('신고면제', e);
+    const goDocs = e['면제번호'] && !before && e['결과'] !== '비대상';
+    S.detailNote = goDocs ? `${e['기관']} 면제번호가 등록되었습니다. 자진확인서·MSDS를 만드세요.` : '';
+    closeModal('exBox'); setTimeout(() => { showDetail(s.id, false, goDocs ? 'ship' : 'ex'); render(); }, 380);
+  } catch (err) { alert('저장하지 못했습니다: ' + ((err && err.message) || err)); }
+};
+window.delEx = async () => { if (!confirm('이 신고면제 기록을 지울까요?')) return; await remove('신고면제', S.exRec.id); closeModal('exBox'); setTimeout(() => showDetail(S.cur.id, false, 'ex'), 380); };
+
+// ---------- MSDS ----------
+const SOLV_COL = ['#2f80d8', '#1a7f37', '#c4520a', '#8250df', '#bf8700', '#d61f69', '#57606a', '#0aa3a3', '#953800'];
+function blankMsds() { return { 제품명: '', 양식: '한인', 용질: { 물질명: '', cas: '', pct: 100, mw: '', 면제번호: '' }, 용질종류: '신규 물질', 용매: [], 성상: '', 색상: '', 용도: '' }; }
+S.msds = blankMsds();
+function msdsFromSample(s, ship) {
+  const inst = ship && ship['고객사'], ex = sampleEx(s.id, inst || undefined), mol = molOf(s);
+  const f = ship ? parseForm(ship['제출형태']) : legacyForm(s), solv = f && f.t === 'sol' ? f.s.map(x => ({ key: x.k, pct: x.p })) : [];
+  const co = ship ? coOf(ship['명의']) : null;
+  const form = (co && co['MSDS양식']) || (ship && ship['명의'] === '엘에스켐' ? '엘에스켐' : '한인');
+  S.msdsCtx = ship ? { sid: s.id, shipId: ship.id } : { sid: s.id };
+  S.msds = { 제품명: s['제품명'], 양식: form,
+    용질: { 물질명: (ex && ex.e['통지물질명']) || s['물질명'] || '', cas: s.CAS || '', pct: f && f.t === 'sol' ? f.p : 100, mw: kindsOf(s).includes('고분자') ? '' : (s['분자량'] || (mol ? chemInfo(mol).mw : '')), 면제번호: ex && ex.st.k === '유효' ? ex.e['면제번호'] : '' },
+    용질종류: kindsOf(s).includes('고분자') ? '고분자' : '신규 물질', 용매: solv, 성상: s['성상'] || '', 색상: '', 용도: s['용도'] || '' };
+}
+function msdsRefresh() {
+  const M = S.msds; $('m_samples').innerHTML = S.samples.map(s => `<option value="${esc(s['제품명'])}">${esc(s['관리번호'] || '')}</option>`).join('');
+  $('m_제품명').value = M.제품명 || ''; seg('m_양식', [...new Set(['한인', '엘에스켐', M.양식 || '한인'])], [M.양식 || '한인'], 'radio', true);
+  const u = M.용질; $('m_물질명').value = u.물질명 || ''; $('m_cas').value = u.cas || ''; $('m_pct').value = u.pct ?? ''; $('m_면제번호').value = u.면제번호 || ''; $('m_mw').value = u.mw || '';
+  $('m_용질종류').value = M.용질종류 || '신규 물질'; ['성상', '색상', '용도'].forEach(k => $('m_' + k).value = M[k] || '');
+  $('m_msg').textContent = ''; renderSolv(); msdsPreview();
+  const c = S.msdsCtx, s = c && S.samples.find(x => x.id === c.sid), sh = c && c.shipId && rows('출고').find(x => x.id === c.shipId);
+  $('m_from').textContent = s ? `${s['관리번호'] || ''} ${s['제품명']}${sh ? ` · ${sh['요청일'] || ''} ${sh['고객사'] || ''} 출고 건 (${sh['명의']})` : ''}` : '';
+}
+window.goMsdsShip = shipId => { const s = S.cur, sh = rows('출고').find(x => x.id === shipId); msdsFromSample(s, sh); navTo('msds', s.id, 'ship'); };
+const companyInfoFor = form => { const c = coOf(form) || {}; return { 회사명: c['회사명'] || '', 주소: c['주소'] || '', 전화: c['전화'] || '' }; };
+window.msdsPick = () => { const s = S.samples.find(x => x['제품명'] === $('m_제품명').value); if (s) { msdsFromSample(s, shipsOf(s.id)[0]); msdsRefresh(); } };
+function renderSolv() {
+  const used = new Set(S.msds.용매.map(c => c.key));
+  $('m_solvbtns').innerHTML = Docs.SOLV_ORDER.map(k => `<button ${used.has(k) ? 'disabled' : ''} onclick="addSolv('${k}')" title="${esc(Docs.SOLV[k].ko)}">+ ${k === 'ACT' ? '아세톤' : k === 'TOL' ? '톨루엔' : k === 'HEX' ? '헥산' : k}</button>`).join('');
+  $('m_solv').innerHTML = S.msds.용매.map((c, i) => { const v = Docs.SOLV[c.key]; return `<div class="srow"><div><b>${esc(v.name)}</b> <span class="hint">${esc(v.ko)}</span><small>CAS ${v.cas} · 인화점 ${v.fp == null ? '없음' : v.fp + ' °C'}</small></div>
+    <div class="pct"><input type="number" step="any" value="${c.pct}" oninput="S.msds.용매[${i}].pct=+this.value;msdsPreview()"> %</div>
+    <button class="sm" onclick="S.msds.용매.splice(${i},1);renderSolv();msdsPreview()">삭제</button></div>`; }).join('') || '<p class="empty">용매 없음 (원액, 유해성 자료없음)</p>';
+}
+window.renderSolv = renderSolv;
+window.addSolv = key => {
+  msdsRead(); const M = S.msds, u = M.용질;
+  if (M.용매.some(c => c.key === key)) return;
+  const sum = (+u.pct || 0) + M.용매.reduce((a, c) => a + (+c.pct || 0), 0);
+  let give = +(100 - sum).toFixed(2);
+  if (give <= 0) { // 가장 많은 성분에서 반을 나눠 줌
+    const big = M.용매.length ? M.용매.reduce((a, c) => (+c.pct > +a.pct ? c : a)) : null;
+    if (big && +big.pct >= (+u.pct || 0)) { give = +(big.pct / 2).toFixed(2); big.pct = +(big.pct - give).toFixed(2); }
+    else { give = +((+u.pct || 0) / 2).toFixed(2); u.pct = +((+u.pct || 0) - give).toFixed(2); $('m_pct').value = u.pct; }
+  }
+  M.용매.push({ key, pct: give }); renderSolv(); msdsPreview();
+};
+function msdsRead() {
+  const M = S.msds; M.제품명 = $('m_제품명').value.trim(); M.양식 = segVal('m_양식') || '한인';
+  M.용질 = { 물질명: $('m_물질명').value.trim(), cas: $('m_cas').value.trim(), pct: $('m_pct').value, 면제번호: $('m_면제번호').value.trim(), mw: $('m_mw').value.trim() };
+  M.용질종류 = $('m_용질종류').value; ['성상', '색상', '용도'].forEach(k => M[k] = $('m_' + k).value.trim());
+  M.형태 = M.용매.length ? `(${M.용질.pct}% ${M.용매.map(x => SOLV_SHORT[x.key] || x.key).join('+')})` : '';
+  const hist = rows('MSDS이력').filter(h => { let t = ''; try { t = JSON.parse(h['입력'] || '{}').형태 || ''; } catch (e) {} return h['제품명'] === M.제품명 && h['양식'] === M.양식 && t === M.형태; }).sort((a, b) => (a['작성일'] || '').localeCompare(b['작성일'] || ''));
+  M.개정차수 = hist.length; M.최초작성일 = hist.length ? hist[0]['작성일'] : S.today; M.작성일 = S.today;
+  return M;
+}
+let ghsImgs = null;
+async function msdsPreview() {
+  const M = msdsRead(), ci = companyInfoFor(M.양식), C = Docs.msdsContent(M, ci);
+  const parts = [{ n: '용질', p: +M.용질.pct || 0, c: '#14304d' }, ...M.용매.map((s, i) => ({ n: s.key, p: +s.pct || 0, c: SOLV_COL[Docs.SOLV_ORDER.indexOf(s.key)] }))], sum = +parts.reduce((a, x) => a + x.p, 0).toFixed(2);
+  $('m_bar').innerHTML = parts.map(x => `<i style="width:${Math.max(0, Math.min(100, x.p))}%;background:${x.c}" title="${x.n} ${x.p}%"></i>`).join('');
+  $('m_sum').innerHTML = Math.abs(sum - 100) < 0.01 ? `<span class="msg ok">합계 100% ✓</span>` : `<span class="msg bad">합계 ${sum}% — 100%가 되어야 합니다</span>`;
+  const w = [...C.flags]; if (!ci.회사명) w.push(`거래처 → 출고사에 ${M.양식} 회사 정보가 없습니다.`);
+  if (M.용매.length) w.push('용매 자료(노출기준, 15번 규제)는 공급사 MSDS로 한 번 검수하세요.');
+  if (!ghsImgs) { try { const T = await Docs.templates(); ghsImgs = T.ghs; } catch (e) { ghsImgs = {}; } }
+  const pics = C.C.pic.length ? `<div class="pics">${C.C.pic.map(g => ghsImgs[g] ? `<img src="data:image/png;base64,${ghsImgs[g]}" title="${g}">` : `<span class="b etc">${g}</span>`).join('')}</div>` : '없음';
+  $('m_prev').innerHTML = `<div class="kv"><div>신호어</div><div>${C.s2.신호어 === '위험' ? '<span class="b bad big">위험</span>' : C.s2.신호어 === '경고' ? '<span class="b wait big">경고</span>' : '해당없음'}</div>
+    <div>그림문자</div><div>${pics}</div>
+    <div>분류</div><div>${C.C.cls.length ? C.C.cls.map(esc).join('<br>') : '자료없음 (분류 안 됨)'}</div>
+    <div>유해·위험문구</div><div>${C.C.h.join(', ') || '없음'}</div>
+    <div>운송(14번)</div><div>${C.s14.un === '해당없음' ? '해당없음' : `UN ${esc(C.s14.un)} · ${esc(C.s14.name)} · ${esc(C.s14.cls)}급 · 용기등급 ${esc(C.s14.pg)}`}</div>
+    <div>위험물(15번)</div><div>${esc(C.s15.위험물)}</div>
+    <div>개정</div><div>${M.개정차수 ? `${M.개정차수}차 개정 (최초 ${esc(M.최초작성일)})` : '최초 작성'}</div></div>` +
+    (w.length ? `<div class="wl" style="margin-top:12px">${w.map(x => `<div>${esc(x)}</div>`).join('')}</div>` : '');
+}
+window.msdsPreview = msdsPreview;
+window.makeMsds = async fmtK => {
+  const M = msdsRead(); if (!M.제품명) { flash('m_msg', '제품명을 입력하세요.', false); return; }
+  const ci = companyInfoFor(M.양식); flash('m_msg', fmtK === 'orig' ? '만드는 중…' : 'PDF로 바꾸는 중… (몇 초 걸려요)');
+  try {
+    const { blob } = await Docs.buildMsdsXlsx(M, ci);
+    const s = S.samples.find(x => x['제품명'] === M.제품명);
+    const name = `${s ? baseName(s) : Docs.safeName(M.제품명)}_MSDS${M.양식 !== '한인' ? '(' + Docs.safeName(M.양식) + ')' : ''}${Docs.safeName(M.형태)}${M.개정차수 ? '_개정' + M.개정차수 : ''}`;
+    await Docs.deliver(blob, name, 'xlsx', fmtK);
+    if (S.pw && $('m_hist').checked) await save('MSDS이력', { 제품명: M.제품명, 양식: M.양식, 입력: JSON.stringify({ 형태: M.형태, 용질: M.용질, 용매: M.용매, 성상: M.성상, 색상: M.색상, 용도: M.용도 }), 작성일: S.today, 개정차수: String(M.개정차수) });
+    flash('m_msg', '✓ 내려받았습니다. 노란 칸을 확인한 뒤 PC에 저장하세요.'); msdsPreview();
+  } catch (e) { flash('m_msg', '만들지 못했습니다: ' + errMsg(e), false); }
+};
+window.cancelMsds = () => {
+  const M = msdsRead(), touched = M.제품명 || M.용질.물질명 || M.용매.length || M.성상 || M.색상;
+  if (touched && !confirm('작성 중인 내용이 지워집니다. 취소할까요?')) return;
+  S.msds = blankMsds(); S.msdsCtx = null; goBack();
+};
+
+// ---------- 설정 ----------
+const SET_TABS = ['기타', '단량체 사전', '업데이트'];
+const ETC_FIELDS = [['자진확인서수량', '자진확인서 취급최대수량(톤)', 'c2'], ['처리업체', '사후처리 처리업체', 'c2'], ['운반업체', '운반·운송업체', 'c2'], ['이송방법', '이동·이송 방법', 'c2'],
+  ['주의_취급', '취급 시 주의사항 (연구개발용 확인서)', 'c6', 1], ['주의_저장', '저장·보관 방법', 'c6', 1], ['주의_화재', '폭발·화재·누출 시 대처방법', 'c6', 1]];
+window.setSetTab = t => { S.setTab = t; renderSettings(); };
+function renderSettings() {
+  $('setTabs').innerHTML = SET_TABS.map(t => `<button class="tab ${S.setTab === t ? 'on' : ''}" onclick="setSetTab('${t}')">${t}</button>`).join('');
+  const body = $('setBody');
+  if (S.setTab === '업데이트') { renderUpdate(); return; }
+  if (S.setTab === '기타') {
+    body.innerHTML = `<div class="box" style="max-width:900px"><h3>서류 공통 값<span class="sp"></span><span class="msg" id="setMsg"></span><button class="primary" onclick="saveEtc()">저장</button></h3>
+      <div class="f">${ETC_FIELDS.map(([id, lab, cl, area]) => `<div class="${cl}"><label>${lab}</label>${area ? `<textarea class="plain" id="set_${id}">${esc(setting(id, ''))}</textarea>` : `<input id="set_${id}" value="${esc(setting(id, ''))}">`}</div>`).join('')}</div></div>`;
+  } else {
+    const cols = ['약어', '물질명', 'CAS'];
+    body.innerHTML = `<div class="box"><h3>단량체 사전</h3>
+      <table class="tbl"><tr><th>구조</th>${cols.map(c => `<th>${c}</th>`).join('')}<th></th></tr>` +
+      [...rows('단량체'), {}].map(r => { const mol = r.idcode && S.OCL ? molFrom(r.idcode, r['좌표']) : null; return `<tr data-id="${r.id || ''}"><td style="width:90px">${r.id ? `<div class="mrow" style="display:block;margin:0"><div class="thumb" onclick="openMono('dict','${r.id}')">${mol ? svgOf(mol, 86, 58) : '구조 그리기'}</div></div>` : ''}</td>${cols.map(c => `<td><input data-c="${c}" value="${esc(r[c] || '')}" placeholder="${r.id ? '' : '새로 추가'}"></td>`).join('')}
+      <td style="white-space:nowrap;text-align:right"><button class="sm" onclick="setSave('단량체',this)">저장</button>${r.id ? ` <button class="sm danger" onclick="setDel('단량체','${r.id}')">삭제</button>` : ''}</td></tr>`; }).join('') + '</table></div>';
+  }
+}
+window.setSave = async (t, btn) => {
+  const tr = btn.closest('tr'), o = Object.assign({}, rows(t).find(r => r.id === tr.dataset.id) || {});
+  tr.querySelectorAll('input[data-c]').forEach(i => o[i.dataset.c] = i.value.trim());
+  if (!o['약어']) { alert('약어를 입력하세요.'); return; }
+  btn.disabled = true; try { await save(t, o); renderSettings(); } catch (e) { alert('저장하지 못했습니다: ' + ((e && e.message) || e)); btn.disabled = false; }
+};
+window.setDel = async (t, id) => { if (!confirm('지울까요?')) return; await remove(t, id); renderSettings(); };
+window.saveEtc = async () => {
+  try { for (const [id] of ETC_FIELDS) { const v = $('set_' + id).value.trim(); if (v !== setting(id, '')) await save('설정', { id, 값: v }); } flash('setMsg', '✓ 저장됨'); }
+  catch (e) { flash('setMsg', '저장하지 못했습니다: ' + errMsg(e), false); }
+};
+
+// ---------- 업데이트 ----------
+function renderUpdate() {
+  const u = S.upd || {};
+  $('setBody').innerHTML = `<div class="box" style="max-width:720px"><h3>업데이트</h3>
+    <div class="upkv">
+      <div class="k">현재 버전</div><div><b>${esc(u.current || $('foot').textContent.split(' ·')[0])}</b></div>
+      <div class="k">저장소</div><div class="row" style="margin:0;gap:6px"><input id="upRepo" style="flex:1" placeholder="jichan-family/hanin-sample" value="${esc(u.repo || '')}"><button class="sm" onclick="saveUpRepo()">저장</button></div>
+      ${u.latest ? `<div class="k">최신 버전</div><div><b>${esc(u.latest)}</b>${u.date ? ` · ${esc(u.date)}` : ''}</div>${u.notes ? `<div class="k">바뀐 점</div><div>${esc(u.notes)}</div>` : ''}` : ''}
+    </div>
+    <div class="row" style="margin:14px 0 0;gap:8px"><button onclick="checkUpd(true)">새 버전 확인</button>
+      ${u.newer ? `<button class="primary" id="upGo" onclick="runUpd()">${esc(u.latest)}(으)로 업데이트</button>` : (u.latest ? '<span class="muted">최신 버전입니다</span>' : '')}
+      <span class="msg" id="upMsg"></span></div></div>`;
+}
+window.saveUpRepo = async () => {
+  try { const r = await call('setUpdateRepo', S.pw, $('upRepo').value); S.upd = Object.assign(S.upd || {}, { repo: r }); await checkUpd(true); }
+  catch (e) { flash('upMsg', errMsg(e), false); }
+};
+window.checkUpd = async (show) => {
+  try {
+    S.upd = await call('checkUpdate', S.pw);
+    const nav = document.querySelector('.nav[data-v="settings"]'); if (nav) nav.classList.toggle('hasnew', !!S.upd.newer);
+    if (show && S.view === 'settings' && S.setTab === '업데이트') renderUpdate();
+  } catch (e) { if (show) { renderUpdate(); flash('upMsg', errMsg(e), false); } }
+};
+window.runUpd = async () => {
+  if (!confirm(`${S.upd.latest}(으)로 업데이트할까요?\n코드를 바꾸고 배포까지 새 버전으로 합니다.`)) return;
+  const b = $('upGo'); b.disabled = true; b.textContent = '업데이트 중… (1분쯤)';
+  try {
+    const r = await call('applyUpdate', S.pw);
+    $('setBody').innerHTML = `<div class="box" style="max-width:720px"><h3>업데이트 완료</h3><p>${esc(r.version)}(으)로 바꿨습니다. (${esc(r.files.join(', '))})</p>
+      <div class="row" style="margin:12px 0 0"><a class="abtn" href="${esc(r.url)}" target="_top">새로 열기</a></div></div>`;
+  } catch (e) { b.disabled = false; b.textContent = '다시 시도'; flash('upMsg', errMsg(e), false); }
+};
+
+// ---------- 거래처 (고객사 · 출고사) ----------
+const CUST_F = [['회사명', 'c3'], ['영문명', 'c3', '자진확인서 To.'], ['주소', 'c6', '연구개발용 확인서 수령업체 주소'], ['담당자', 'c6', '쉼표로 여러 명 · 출고 등록 때 목록으로 나옴'],
+  ['안전관리자', 'c2', '연구개발용 확인서'], ['안전관리자직위', 'c2', '직위'], ['안전관리자연락처', 'c2', '연락처'], ['보관창고', 'c6', '연구개발용 확인서 보관창고(장소)'], ['메모', 'c6']];
+const CO_F = [['이름', 'c2', '목록 탭·딱지에 쓰는 짧은 이름'], ['회사명', 'c2', '서류에 들어가는 정식 이름'], ['대표', 'c2', '서명 줄'], ['사업자번호', 'c2', 'CAS 미부여 확인서'], ['전화', 'c2', 'MSDS 긴급전화'], ['팩스', 'c2'],
+  ['주소', 'c6', 'CAS 미부여 확인서·MSDS'], ['부서', 'c2', 'CAS 미부여 확인서 담당'], ['담당자', 'c2'], ['이메일', 'c2'], ['안전관리자', 'c2', '연구개발용 확인서'], ['안전관리자직위', 'c2', '직위'], ['안전관리자연락처', 'c2', '연락처']];
+window.setPtTab = t => { S.ptTab = t; renderPartners(); };
+function custStats(n) { const sh = rows('출고').filter(x => x['고객사'] === n); return { n: sh.length, last: sh.map(x => x['요청일'] || '').sort().pop() || '', ex: rows('신고면제').filter(e => (e['기관'] || '동우화인켐') === n).length }; }
+function renderPartners() {
+  $('ptTabs').innerHTML = ['고객사', '출고사'].map(t => `<button class="tab ${S.ptTab === t ? 'on' : ''}" onclick="setPtTab('${t}')">${t}</button>`).join('');
+  $('ptAdd').textContent = S.ptTab === '고객사' ? '+ 고객사 추가' : '+ 출고사 추가';
+  if (S.ptTab === '고객사') {
+    
+    const known = rows('고객사'), extra = [...new Set(rows('출고').map(x => x['고객사']).filter(n => n && !custOf(n)))];
+    $('ptBody').innerHTML = '<div class="pgrid">' + known.map(c => { const st = custStats(c['회사명']), miss = ['주소', '안전관리자', '보관창고'].filter(k => !c[k]);
+      return `<div class="pcard" onclick="openPartner('고객사','${c.id}')"><h4>${esc(c['회사명'])}</h4><div class="sub">${esc(c['영문명'] || '')}</div>
+        <div class="badges">${list(c['필요서류']).map(d => `<span class="b info">${DOC_LABEL[d] || d}</span>`).join('') || '<span class="b etc">필요 서류 미지정</span>'}</div>
+        <div class="sub">출고 ${st.n}건${st.last ? ' · 최근 ' + esc(st.last) : ''} · 신고면제 ${st.ex}건</div>
+        <div class="badges">${miss.map(k => `<span class="miss">${k} 없음</span>`).join('')}</div></div>`; }).join('') +
+      extra.map(n => `<div class="pcard" style="border-style:dashed"><h4>${esc(n)}</h4><div class="sub">출고 기록에만 있는 이름 (일회성)</div><div class="sub">출고 ${custStats(n).n}건</div>
+        <div><button class="sm edit-only" onclick="event.stopPropagation();addCustFrom('${esc(n)}')">고객사로 추가</button></div></div>`).join('') + '</div>';
+  } else {
+    
+    const etc = etcNames();
+    $('ptBody').innerHTML = '<div class="pgrid">' + coRows().map(c => { const n = S.samples.filter(s => s['관리회사'] === c['이름']).length, sh = rows('출고').filter(x => x['명의'] === c['이름']).length, d = list(c['작성서류']);
+      const miss = ['회사명', '주소'].concat(d.includes('CAS미부여확인서') ? ['사업자번호'] : []).concat(d.includes('연구개발용확인서') ? ['대표', '안전관리자'] : []).filter(k => !c[k]);
+      return `<div class="pcard" onclick="openPartner('출고사','${c.id}')"><h4>${coBadge(c['이름'])} ${esc(c['회사명'] || '')}</h4>
+        <div class="sub">관리 샘플 ${n}건 · 출고 ${sh}건 · MSDS ${esc(c['MSDS양식'] || '한인')} 양식</div>
+        <div class="badges">${d.map(x => `<span class="b info">${DOC_LABEL[x] || x}</span>`).join('') || '<span class="b etc">작성 서류 없음 (기록만)</span>'}</div>
+        <div class="badges">${miss.map(k => `<span class="miss">${k} 없음</span>`).join('')}</div></div>`; }).join('') + '</div>' +
+      (etc.length ? `<h3 style="margin:22px 0 10px;font-size:15px">기타 출고사</h3><div class="pgrid">` + etc.map(nm => { const n = S.samples.filter(s => s['관리회사'] === '기타' && s['기타회사'] === nm).length, sh = rows('출고').filter(x => x['명의'] === nm).length;
+        return `<div class="pcard" style="border-style:dashed;cursor:default"><h4>${esc(nm)}</h4><div class="sub">기타로 관리 중 · 샘플 ${n}건 · 출고 ${sh}건</div>
+          <div><button class="sm edit-only" onclick="promote('${esc(nm)}')">정식 출고사로 등록</button></div></div>`; }).join('') + '</div>' : '');
+  }
+}
+window.addCustFrom = async n => { try { await save('고객사', { 회사명: n, 필요서류: 'MSDS' }); renderPartners(); } catch (e) { alert('저장하지 못했습니다: ' + ((e && e.message) || e)); } };
+window.promote = async n => {
+  if (!confirm(`"${n}"을(를) 정식 출고사로 등록할까요?\n기존 샘플의 관리번호(기타-n)는 그대로 두고, 앞으로 새 샘플은 "${n}-1"부터 번호가 붙습니다.`)) return;
+  try { const r = await call('promoteCompany', S.pw, n); upsert('출고사', r.company); r.samples.forEach(s => upsert('샘플', s)); renderPartners(); render(); } catch (e) { alert('등록하지 못했습니다: ' + ((e && e.message) || e)); }
+};
+window.openPartner = (kind, id) => {
+  kind = kind || S.ptTab; const tbl = kind === '고객사' ? '고객사' : '출고사';
+  const r = id ? rows(tbl).find(x => x.id === id) : (kind === '출고사' ? { 정식: 'Y', 색: '#8250df', MSDS양식: '한인', 작성서류: 'MSDS' } : { 필요서류: 'MSDS' });
+  S.pt = { kind, tbl, r: Object.assign({}, r) }; const ro = S.pw ? '' : 'disabled';
+  $('ptTitle').textContent = id ? `${kind} — ${r['회사명'] || r['이름']}` : `${kind} 추가`;
+  const F = kind === '고객사' ? CUST_F : CO_F;
+  let html = `<div class="f">${F.map(([k, cl, use]) => `<div class="${cl}"><label title="${esc(use || '')}">${k === '안전관리자직위' ? '직위' : k === '안전관리자연락처' ? '연락처' : k}</label><input data-k="${k}" value="${esc(r[k] || '')}" ${ro} ${kind === '출고사' && k === '이름' && id ? 'readonly' : ''}></div>`).join('')}</div>`;
+  if (kind === '고객사') {
+    html += `<div class="box" style="margin-top:14px"><h3>기본 필요 서류</h3><div class="chk">${SUB_DOCS.map(d => `<label><input type="checkbox" data-need="${d}" ${list(r['필요서류']).includes(d) ? 'checked' : ''} ${ro}>${DOC_LABEL[d]}</label>`).join('')}</div></div>`;
+    if (id) { const n = r['회사명'], sh = rows('출고').filter(x => x['고객사'] === n), ex = rows('신고면제').filter(e => (e['기관'] || '동우화인켐') === n);
+      html += `<div class="box"><h3>거래 이력</h3>${sh.length || ex.length ? `<table class="tbl"><tr><th>구분</th><th>샘플</th><th>날짜</th><th>내용</th></tr>` +
+        sh.map(x => { const s = S.samples.find(y => y.id === x['샘플id']) || {}; return `<tr style="cursor:pointer" onclick="closeAllModals();showDetail('${x['샘플id']}',false,'ship')"><td>출고</td><td>${esc(s['관리번호'] || '')} ${esc(s['제품명'] || x['제품명'])}</td><td>${esc(x['요청일'] || '')}</td><td>${coBadge(x['명의'])} ${esc(formText(parseForm(x['제출형태'])))}</td></tr>`; }).join('') +
+        ex.map(e => { const s = S.samples.find(y => y.id === e['샘플id']) || {}, st = exState(e); return `<tr style="cursor:pointer" onclick="closeAllModals();showDetail('${e['샘플id']}',false,'ex')"><td>신고면제</td><td>${esc(s['관리번호'] || '')} ${esc(s['제품명'] || e['제품명'])}</td><td>${esc(e['신청일'] || '')}</td><td><span class="b ${st.cls}">${st.txt}</span></td></tr>`; }).join('') + '</table>' : '<p class="empty">아직 없음</p>'}</div>`; }
+  } else {
+    const d = list(r['작성서류']);
+    html += `<div class="box" style="margin-top:14px"><h3 title="체크한 서류만 버튼이 나옵니다">작성 서류</h3>
+      <div class="chk" style="margin-bottom:8px"><b style="font-size:13px;min-width:64px">신고면제</b>${EX_DOCS.map(x => `<label><input type="checkbox" data-doc="${x}" ${d.includes(x) ? 'checked' : ''} ${ro}>${DOC_LABEL[x]}</label>`).join('')}</div>
+      <div class="chk"><b style="font-size:13px;min-width:64px">제출</b>${SUB_DOCS.map(x => `<label><input type="checkbox" data-doc="${x}" ${d.includes(x) ? 'checked' : ''} ${ro}>${DOC_LABEL[x]}</label>`).join('')}
+        <label>MSDS 양식 <select id="pt_msds" ${ro}>${['한인', '엘에스켐'].map(x => `<option ${x === (r['MSDS양식'] || '한인') ? 'selected' : ''}>${x}</option>`).join('')}</select></label></div></div>
+      <div class="box"><h3>표시·직인</h3><div class="row" style="margin:0;gap:16px;align-items:flex-start">
+        <label>딱지 색 <input type="color" id="pt_color" value="${esc(r['색'] || '#8250df')}" ${ro}></label>
+        <div><div class="stampbox" id="pt_stamp">${r['직인'] ? `<img src="data:image/png;base64,${r['직인']}">` : (r['이름'] === '한인' ? '<span class="hint" style="text-align:center">기본 직인<br>사용</span>' : '<span class="hint">없음</span>')}</div>
+          <div class="row edit-only" style="margin-top:6px"><label class="sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="stampUpload(this)"><span class="b info">직인 그림 올리기</span></label><button class="sm" onclick="S.pt.r['직인']='';$('pt_stamp').innerHTML='<span class=hint>없음</span>'">지우기</button></div></div>
+</div></div>`;
+  }
+  $('ptForm').innerHTML = html; $('ptMsg').textContent = ''; $('ptDel').style.visibility = id ? '' : 'hidden';
+  openModal('ptBox');
+};
+window.stampUpload = inp => {
+  const f = inp.files[0]; if (!f) return; const img = new Image();
+  img.onload = () => { let size = 260, b64 = '';
+    do { const k = Math.min(1, size / Math.max(img.width, img.height)), cv = document.createElement('canvas'); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+      const g = cv.getContext('2d'); g.drawImage(img, 0, 0, cv.width, cv.height); const d = g.getImageData(0, 0, cv.width, cv.height), p = d.data;
+      for (let i = 0; i < p.length; i += 4) { const red = p[i] - (p[i + 1] + p[i + 2]) / 2; if (p[i] > 200 && p[i + 1] > 200 && p[i + 2] > 200) p[i + 3] = 0; else if (red > 40) { p[i + 3] = Math.min(255, red * 2.2); } }
+      g.putImageData(d, 0, 0); b64 = cv.toDataURL('image/png').split(',')[1]; size -= 40; } while (b64.length > 45000 && size > 80);
+    S.pt.r['직인'] = b64; $('pt_stamp').innerHTML = `<img src="data:image/png;base64,${b64}">`; URL.revokeObjectURL(img.src); };
+  img.src = URL.createObjectURL(f);
+};
+window.savePartner = async () => {
+  const { tbl, r } = S.pt; document.querySelectorAll('#ptForm input[data-k]').forEach(i => r[i.dataset.k] = i.value.trim());
+  if (tbl === '고객사') { if (!r['회사명']) { flash('ptMsg', '회사명을 입력하세요.', false); return; } r['필요서류'] = [...document.querySelectorAll('#ptForm input[data-need]:checked')].map(i => i.dataset.need).join(','); }
+  else { if (!r['이름']) { flash('ptMsg', '이름을 입력하세요.', false); return; }
+    if (!r.id && coOf(r['이름'])) { flash('ptMsg', '같은 이름의 출고사가 있습니다.', false); return; }
+    r['작성서류'] = [...document.querySelectorAll('#ptForm input[data-doc]:checked')].map(i => i.dataset.doc).join(','); r['MSDS양식'] = $('pt_msds').value; r['색'] = $('pt_color').value; r['정식'] = 'Y';
+    if (!r['순서']) r['순서'] = String(coRows().length + 1); }
+  try { const saved = await save(tbl, r); S.pt.r = saved; flash('ptMsg', '✓ 저장됨'); renderPartners(); render(); } catch (e) { flash('ptMsg', '저장하지 못했습니다: ' + errMsg(e), false); }
+};
+window.delPartner = async () => {
+  const { tbl, r } = S.pt; if (!r.id || !confirm(`${r['회사명'] || r['이름']}을(를) 지울까요? 출고·샘플 기록은 그대로 남습니다.`)) return;
+  try { await remove(tbl, r.id); closeModal('ptBox'); renderPartners(); render(); } catch (e) { flash('ptMsg', '지우지 못했습니다: ' + errMsg(e), false); }
+};
+
+// ---------- 시작 ----------
+window.render = render; window.renderDetail = renderDetail;
+(async function init() {
+  restorePw();
+  try {
+    const d = await call('getAll');
+    S.data = d.data; S.samples = rows('샘플'); S.today = d.today;
+    $('foot').textContent = `${d.version} · ${d.updated}`; $('foot').title = `최종 수정 ${d.updated} · 최초 제작 ${d.created}`;
+    const warn = [];
+    if (d.hasTemplates === false) warn.push('서류 양식(Templates)을 찾지 못했습니다. Apps Script에서 <b>Templates를 HTML이 아닌 "스크립트" 파일</b>로 만들고 Templates.gs.txt 내용을 붙여넣은 뒤 새 버전으로 배포하세요.');
+    if (!rows('출고사').length) warn.push('출고사 정보가 없습니다. Apps Script에서 <b>setup</b>을 한 번 실행해 주세요.');
+    if (warn.length) { const w = $('tplWarn'); w.style.display = ''; w.innerHTML = warn.map(x => '⚠ ' + x).join('<br>'); }
+    render();
+  } catch (e) { $('status').textContent = '데이터를 불러오지 못했습니다: ' + ((e && e.message) || e); return; }
+  try { await loadOCL(); drawCards(); }
+  catch (e) { $('status').textContent += ' · 구조 라이브러리를 불러오지 못해 구조 그림과 구조 검색을 쓸 수 없습니다.'; }
+})();

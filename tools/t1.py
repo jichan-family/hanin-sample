@@ -1,0 +1,27 @@
+import asyncio
+from playwright.async_api import async_playwright
+async def main():
+    async with async_playwright() as p:
+        b=await p.chromium.launch(executable_path='/usr/bin/google-chrome',args=['--no-sandbox'])
+        ctx=await b.new_context(viewport={'width':1440,'height':950},accept_downloads=True); pg=await ctx.new_page()
+        logs=[]; pg.on('dialog',lambda d: asyncio.ensure_future(d.accept())); pg.on('pageerror',lambda e: logs.append('ERR '+str(e)))
+        dls=[]; pg.on('download',lambda d: dls.append(d.suggested_filename))
+        await pg.goto('http://localhost:8765/index.html'); await pg.wait_for_function("document.querySelectorAll('.struct svg').length>30",timeout=30000)
+        await pg.click('#lockBtn'); await pg.fill('#pwIn','1185'); await pg.click('#pwBox button.primary'); await pg.wait_for_timeout(500)
+        sid=await pg.evaluate("S.samples.find(s=>s.idcode && !s.CAS && s['물질명']).id"); sb=await pg.evaluate("S.samples[1].id")
+        await pg.evaluate(f"showDetail('{sid}')"); await pg.wait_for_timeout(300); await pg.screenshot(path='x1.png')
+        await pg.click('#dTabs button:has-text("신고면제")'); await pg.wait_for_timeout(300); await pg.screenshot(path='x2.png')
+        await pg.click('#xd_rows .docrow:has-text("연구개발용") button:has-text("Word")'); await pg.wait_for_timeout(1500)
+        await pg.click('#xd_rows .docrow:has-text("물질 식별정보") button:has-text("PNG")'); await pg.wait_for_timeout(1500)
+        await pg.click('#xd_rows .docrow:has-text("CAS 미부여") button:has-text("PDF")'); await pg.wait_for_timeout(1500)
+        await pg.evaluate("closeAllModals()")
+        await pg.evaluate(f"showDetail('{sb}',false,'ship')"); await pg.wait_for_timeout(300)
+        await pg.click('#dShipTab >> text=+ 출고 등록'); await pg.wait_for_timeout(300)
+        await pg.click('#shipBox button.primary'); await pg.wait_for_timeout(800)
+        await pg.screenshot(path='x3.png')
+        await pg.click('#dShips .docrow:has-text("자진확인서") button:has-text("편집") >> nth=0'); await pg.wait_for_timeout(200); await pg.screenshot(path='x4.png')
+        await pg.click('#dShips .docrow:has-text("자진확인서") button:has-text("Word") >> nth=0'); await pg.wait_for_timeout(1500)
+        await pg.click('#dShips .docrow:has-text("서류 제출") button:has-text("저장") >> nth=0'); await pg.wait_for_timeout(500)
+        await pg.screenshot(path='x5.png')
+        print('downloads:', dls); print(logs); await b.close()
+asyncio.run(main())
