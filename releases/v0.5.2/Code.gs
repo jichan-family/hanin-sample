@@ -424,8 +424,12 @@ function findDeployment_() {
 }
 
 /** 저장소의 latest.json이 가리키는 버전으로 코드를 바꾸고 배포까지 새 버전으로 */
-function applyUpdate(pw) {
-  checkPw_(pw);
+function applyUpdate(pw) { checkPw_(pw); return doUpdate_(); }
+
+/** 편집기에서 ▶ 실행: 저장소의 최신 코드로 바꾸고 배포까지 */
+function updateNow() { var r = doUpdate_(); Logger.log(r.version + ' 업데이트 완료 · ' + r.files.join(', ') + ' · ' + r.url); return r; }
+
+function doUpdate_() {
   var repo = updRepo_();
   if (!repo) throw new Error('업데이트 저장소가 정해지지 않았습니다.');
   var lock = LockService.getScriptLock(); lock.waitLock(30000);
