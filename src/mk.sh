@@ -1,5 +1,5 @@
 cd /home/claude/v6 && python3 - <<'P'
-V='v0.5.2 · 최종 수정 2026-11-26'
+V='v0.5.3 · 최종 수정 2026-11-26'
 for n,f,t in [('Editor','editor.js',''),('Docs','docs.js',''),('App','app.js',' type="module"')]:
     open(n+'.html','w').write(f"<!-- 한인정밀화학 샘플 관리 — {n}.html · 버전 {V} -->\n<script{t}>\n"+open(f).read()+"\n</script>\n")
 P
