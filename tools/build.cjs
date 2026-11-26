@@ -1,6 +1,6 @@
 const fs=require('fs'), v='/home/claude/v6/';
 eval(fs.readFileSync(v+'Templates.gs','utf8')+';global.T=TEMPLATES');
-fs.writeFileSync('templates.json',JSON.stringify(T));
+eval(fs.readFileSync(v+'Forms.gs','utf8')+';Object.assign(T,FORMS)'); fs.writeFileSync('templates.json',JSON.stringify(T));
 const rows=JSON.parse(fs.readFileSync('/home/claude/mig/rows3.json','utf8'));
 const today='2026-11-26';
 const a=rows[0], b=rows[1];

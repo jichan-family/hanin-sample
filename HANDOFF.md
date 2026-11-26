@@ -3,7 +3,7 @@
 - 이 저장소가 기준 코드. releases/<버전>/ = Apps Script에 들어가는 파일, latest.json = 앱이 읽는 최신 버전.
 - src/ = 화면 코드 원본(app.js, editor.js, docs.js). src/mk.sh가 Editor/Docs/App.html을 만듦.
 - Code.gs, Index.html은 releases/<최신>/ 것을 그대로 고쳐 씀.
-- Templates.gs(직인 포함)는 저장소에 없음. 사용자 Apps Script에만 있음.
+- Templates.gs(직인 포함)는 저장소에 없음. 사용자 Apps Script에만 있음. 서류 양식은 Forms.gs(저장소, 업데이트로 교체)가 Templates보다 우선. 양식 만들기: tools/mk_rnd2.py, mk_cas3.py.
 - 새 버전 배포: 파일 고침 → releases/<새버전>/ 에 넣고 latest.json 갱신 → push → 사용자가 앱 [설정 → 업데이트] 클릭.
 - tools/build.cjs + t1.py/t2.py = 로컬 시험 화면(mock) 만들기·검사.
 - 설계 문서(수정 이력·수정 대기): https://claude.ai/artifact/NaHJvKMCxWmb93kNr5ftZt

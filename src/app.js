@@ -331,9 +331,11 @@ function exDocsFor(s, co) {
 const FMTB = { docx: [['orig', 'Word'], ['pdf', 'PDF']], xlsx: [['orig', 'Excel'], ['pdf', 'PDF']], png: [['orig', 'PNG']] };
 function renderExTab(s) {
   const L = exOf(s.id);
-  $('dEx').innerHTML = L.length ? L.map(e => { const st = exState(e); return `<div class="exrow"><b>${esc(e['기관'] || '동우화인켐')}</b><span class="b ${st.cls}">${st.txt}</span>
-      <span>${esc(e['면제번호'] || '')}</span><span class="hint" title="신청일 · 연구개발기간 · 신청 회사">${e['신청일'] ? '신청 ' + esc(e['신청일']) : ''}${e['기간시작'] ? ' · ' + esc(e['기간시작']) + ' ~ ' + esc(e['기간종료']) : ''}${(e['신청회사'] || '한인') !== '한인' ? ' · ' + esc(e['신청회사']) : ''}</span>
-      <span style="flex:1"></span><button class="sm edit-only" onclick="openEx('${e.id}')">수정</button></div>`; }).join('')
+  const L2 = [...L].reverse();
+  $('dEx').innerHTML = L.length ? L2.map((e, i) => { const st = exState(e); return `<div class="exrow"><span class="exno">${i + 1}</span>
+      <b class="exnum">${e['면제번호'] ? esc(e['면제번호']) : `<span class="dash">통지 대기${e['신청일'] ? ' (신청 ' + esc(e['신청일']) + ')' : ''}</span>`}</b>
+      <span class="exdate">${esc(e['통지일'] || '')}</span><span class="exinst">${esc(e['기관'] || '동우화인켐')}</span><span class="b ${st.cls} exst">${st.txt}</span>
+      <span style="flex:1"></span><button class="sm" onclick="openEx('${e.id}')">상세</button></div>`; }).join('')
     : '<div class="exrow"><span class="dash">기록 없음</span></div>';
   const cos = coNames().filter(n => coDocs(n).some(d => EX_DOCS.includes(d)));
   if (!S.exCo || !cos.includes(S.exCo)) S.exCo = (L[0] && L[0]['신청회사']) || (cos.includes(companyOf(s)) ? companyOf(s) : '한인');
@@ -371,11 +373,11 @@ window.exDocRun = async (k, fk) => {
       await Docs.deliver(await Docs.buildRnd(v, c['직인'] || (co === '한인' ? T.stamp : null)), `${baseName(s)}_연구개발용화학물질확인서${inst !== '동우화인켐' ? '(' + Docs.safeName(inst) + ')' : ''}`, 'docx', fk);
     } else if (k === 'CAS미부여확인서') {
       if (!nm) throw new Error('물질명을 입력하세요.');
-      const v = { 물질명: nm, 회사명: c['회사명'] || co, 주소: c['주소'] || '', 사업자번호: c['사업자번호'] || '', 담당자: [c['부서'], c['담당자']].filter(Boolean).join(' '), 확인일: korDate($('xd_date').value || S.today) };
-      await Docs.deliver(await Docs.buildCasCert(v, molOf(s)), `${baseName(s)}_CAS미부여확인서${co !== '한인' ? '(' + Docs.safeName(co) + ')' : ''}`, 'docx', fk);
+      const v = { 물질명: nm, 회사명: c['회사명'] || co, 주소: c['주소'] || '', 사업자번호: c['사업자번호'] || '', 담당자: [c['부서'], c['담당자']].filter(Boolean).join(' '), 확인일: korDate($('xd_date').value || S.today), 대표: c['대표'] || '' };
+      await Docs.deliver(await Docs.buildCasCert(v, molOf(s), c['직인'] || (co === '한인' ? (await Docs.templates()).stamp : null)), `${baseName(s)}_CAS미부여확인서${co !== '한인' ? '(' + Docs.safeName(co) + ')' : ''}`, 'docx', fk);
     } else if (k === '물질식별정보') {
       if (!nm) throw new Error('물질명을 입력하세요.');
-      const m = molOf(s); Docs.download(await Docs.buildIdPng(m, chemInfo(m).mw, nm), `${baseName(s)}_물질식별정보.png`);
+      const m = molOf(s), ci = chemInfo(m); Docs.download(await Docs.buildIdPng(m, ci.mw, nm, ci.formula), `${baseName(s)}_물질식별정보.png`);
     } else if (k === '단량체정보') {
       await Docs.deliver(await Docs.buildMonomerXlsx(s, parseMono(s['단량체']).map(x => ({ 물질명: x.name, CAS: x.cas }))), `${baseName(s)}_단량체정보`, 'xlsx', fk);
     }
@@ -752,7 +754,7 @@ window.saveShip = async () => {
 window.delShip = async () => { if (!confirm('이 출고 기록을 지울까요?')) return; await remove('출고', S.ship.id); closeModal('shipBox'); setTimeout(() => showDetail(S.cur.id, false, 'ship'), 380); };
 
 // ---------- 신고면제 ----------
-const EX_KEYS = ['신청일', '기간시작', '기간종료', '통지일', '면제번호', '결과', '사유', '통지물질명', '통지CAS', '연간제조량', '비고'];
+const EX_KEYS = ['신청일', '통지일', '면제번호', '통지물질명', '통지CAS'];
 window.openEx = id => {
   const s = S.cur, e = id ? rows('신고면제').find(r => r.id === id) : { 신청일: S.today, 기관: '동우화인켐', 신청회사: S.exCo || '한인' };
   S.exRec = e; $('eTitle').textContent = `신고면제 — ${s['제품명']}`;
@@ -761,22 +763,20 @@ window.openEx = id => {
   $('e_기관').innerHTML = insts.map(n => `<option ${n === (e['기관'] || '동우화인켐') ? 'selected' : ''}>${esc(n)}</option>`).join('');
   const cos = [...new Set([...coNames(), e['신청회사'] || '한인'])];
   $('e_신청회사').innerHTML = cos.map(n => `<option ${n === (e['신청회사'] || '한인') ? 'selected' : ''}>${esc(n)}</option>`).join('');
-  if (!e.id) exDates();
-  $('eWarn').innerHTML = ''; $('eWarn').className = 'warn'; $('eFile').value = ''; $('eCopied').textContent = ''; $('eDel').style.visibility = e.id ? '' : 'hidden';
+  $('eWarn').innerHTML = ''; $('eWarn').className = 'warn'; $('eFile').value = ''; $('eDel').style.visibility = e.id ? '' : 'hidden';
   openModal('exBox');
 };
-window.exDates = () => { const d = $('e_신청일').value; $('e_기간시작').value = d; $('e_기간종료').value = yearEnd(d); };
-window.copyPeriod = () => {
-  const t = `${$('e_기간시작').value} ~ ${$('e_기간종료').value}`;
-  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { $('eCopied').textContent = '복사됨: ' + t; }, () => { prompt('복사해서 쓰세요', t); });
-};
 const norm = t => String(t || '').toLowerCase().replace(/[\s\-_,()[\]{}'"]/g, '');
-window.readNoticeFile = async inp => {
-  const f = inp.files[0]; if (!f) return; const w = $('eWarn');
+window.readNoticeFile = async inp => noticeFill(inp.files[0]);
+async function noticeFill(f) {
+  if (!f) return; const w = $('eWarn');
   w.className = 'warn'; w.textContent = '통지서 읽는 중… (파일은 저장되지 않습니다)';
   try {
     const r = await Docs.readNotice(f), s = S.cur, msgs = [];
-    ['면제번호', '통지일', '결과', '사유', '연간제조량'].forEach(k => { if (r[k]) $('e_' + k).value = r[k]; });
+    ['면제번호', '통지일'].forEach(k => { if (r[k]) $('e_' + k).value = r[k]; });
+    S.exRec._notice = { 결과: r.결과 || '', 사유: r.사유 || '', 연간제조량: r.연간제조량 || '' };
+    const inst = rows('고객사').map(c => c['회사명']).find(n => n && r.원문 && norm(r.원문).includes(norm(n)));
+    if (inst && !S.exRec.id) $('e_기관').value = inst;
     if (r.물질명) $('e_통지물질명').value = r.물질명; if (r.CAS) $('e_통지CAS').value = r.CAS;
     if (!r.면제번호) msgs.push('면제확인번호를 찾지 못했습니다. 직접 입력하세요.');
     if (r.물질명 && s['물질명'] && norm(r.물질명) !== norm(s['물질명'])) msgs.push(`통지서 물질명이 샘플 물질명과 다릅니다.<br>· 통지서: ${esc(r.물질명)}<br>· 샘플: ${esc(s['물질명'])}`);
@@ -784,11 +784,19 @@ window.readNoticeFile = async inp => {
     if (r.결과 === '비대상') msgs.push('결과가 <b>비대상</b>입니다. 사유를 확인하세요.');
     w.innerHTML = msgs.length ? msgs.map(x => '⚠ ' + x).join('<br>') : '✓ 통지서 내용을 채웠습니다.';
   } catch (e) { w.className = 'warn err'; w.textContent = '통지서를 읽지 못했습니다: ' + ((e && e.message) || e); }
+}
+// 기록 칸에서 바로 통지서 넣기: 통지 대기 기록이 있으면 거기에, 없으면 새 기록
+window.exNotice = f => {
+  if (!f) return;
+  const wait = exOf(S.cur.id).find(e => !e['면제번호']);
+  openEx(wait ? wait.id : null); noticeFill(f);
 };
 window.saveEx = async () => {
   const s = S.cur, e = Object.assign({}, S.exRec), before = S.exRec['면제번호'];
   e['샘플id'] = s.id; e['제품명'] = s['제품명']; e['기관'] = $('e_기관').value; e['신청회사'] = $('e_신청회사').value;
   EX_KEYS.forEach(k => e[k] = $('e_' + k).value.trim());
+  if (e._notice) { Object.keys(e._notice).forEach(k => { if (e._notice[k]) e[k] = e._notice[k]; }); delete e._notice; }
+  e['기간시작'] = e['신청일']; e['기간종료'] = e['신청일'] ? yearEnd(e['신청일']) : '';
   try {
     await save('신고면제', e);
     const goDocs = e['면제번호'] && !before && e['결과'] !== '비대상';

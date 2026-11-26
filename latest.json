@@ -1,12 +1,17 @@
 {
-  "version": "v0.5.3",
+  "version": "v0.5.4",
   "date": "2026-11-26",
-  "notes": "샘플 정보에 출고 내역, 출고 서류 탭, 좁은 화면 맞춤·저장 버튼 고정, Claude 입력 통로·여러 개 한 번에 등록",
+  "notes": "신고면제 기록 간단히(통지서 넣기, 목록·상세), 연구개발용 확인서 원본 모양, CAS 미부여 확인서 직인·한 장, PDF 글꼴 맞춤, 식별정보에 분자식",
   "files": [
     {
       "name": "Code",
       "type": "SERVER_JS",
       "path": "Code.gs"
+    },
+    {
+      "name": "Forms",
+      "type": "SERVER_JS",
+      "path": "Forms.gs"
     },
     {
       "name": "Index",

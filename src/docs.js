@@ -306,13 +306,19 @@ async function buildMonomerXlsx(sample, monomers) {
 
 // ---------- 워드 채우기 ----------
 const xmlEsc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-async function fillDocx(b64, map, imagePng) {
+async function fillDocx(b64, map, images) {
   await loadScript('jszip');
   const zip = await JSZip.loadAsync(b64ToBytes(b64));
   let x = await zip.file('word/document.xml').async('string');
-  Object.entries(map).forEach(([k, v]) => { x = x.split('{{' + k + '}}').join(xmlEsc(v).replace(/\r?\n/g, '</w:t><w:br/><w:t xml:space="preserve">')); });
+  Object.entries(map).forEach(([k, v]) => {
+    const tok = '{{' + k + '}}', lines = String(v == null ? '' : v).split(/\r?\n/);
+    // 여러 줄 값이 한 문단을 다 차지하면 줄마다 문단을 나눔(내어쓰기 유지)
+    if (lines.length > 1) x = x.replace(new RegExp('<w:p\\b(?:(?!<w:p\\b)[\\s\\S])*?' + tok.replace(/[{}]/g, c => '\\' + c) + '[\\s\\S]*?</w:p>', 'g'), p => lines.map(l => p.split(tok).join(xmlEsc(l))).join(''));
+    x = x.split(tok).join(xmlEsc(v).replace(/\r?\n/g, '</w:t><w:br/><w:t xml:space="preserve">'));
+  });
   zip.file('word/document.xml', x);
-  if (imagePng) zip.file('word/media/image1.png', imagePng);
+  if (images instanceof Uint8Array) images = { 'word/media/image1.png': images };
+  Object.entries(images || {}).forEach(([p, b]) => { if (b && zip.file(p)) zip.file(p, b); });
   return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 }
 async function structurePng(mol, w = 1200, h = 700) {
@@ -327,9 +333,9 @@ async function structurePng(mol, w = 1200, h = 700) {
   } else { g.fillStyle = '#9aa0a6'; g.font = '36px sans-serif'; g.textAlign = 'center'; g.fillText('(구조 그림을 붙여 넣으세요)', w / 2, h / 2); }
   return new Promise(ok => canvas.toBlob(b => b.arrayBuffer().then(a => ok(new Uint8Array(a))), 'image/png'));
 }
-async function buildRnd(v, stampB64) { const T = await templates(); return fillDocx(T.rnd, v, stampB64 ? b64ToBytes(stampB64) : null); }
+async function buildRnd(v, stampB64) { const T = await templates(); return fillDocx(T.rnd, v, { 'word/media/image1.png': stampB64 ? b64ToBytes(stampB64) : null }); }
 // 물질 식별정보: 위 분자량, 가운데 구조, 아래 물질명 (PNG)
-async function buildIdPng(mol, mw, name) {
+async function buildIdPng(mol, mw, name, formula) {
   const W = 1100, pad = 40, font = '30px Arial, sans-serif';
   const cv = document.createElement('canvas'), g = cv.getContext('2d');
   g.font = font;
@@ -339,25 +345,36 @@ async function buildIdPng(mol, mw, name) {
   const svg = svg0.replace(/rgb\(\d+,\s*\d+,\s*\d+\)/g, 'rgb(0,0,0)'); // ChemDraw처럼 검은색
   const img = new Image(); await new Promise((ok, no) => { img.onload = ok; img.onerror = no; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
   const iw = img.naturalWidth || 900, ih = img.naturalHeight || 600, k = Math.min((W - pad * 2) / iw, 620 / ih, 2.2), dw = iw * k, dh = ih * k;
-  const H = pad + 44 + 20 + dh + 30 + lines.length * 40 + pad;
+  const top = formula ? 84 : 44, H = pad + top + 20 + dh + 30 + lines.length * 40 + pad;
   cv.width = W; cv.height = H; g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
   g.fillStyle = '#000'; g.textAlign = 'center'; g.font = font;
-  g.fillText('Molecular Weight: ' + mw, W / 2, pad + 32);
-  g.drawImage(img, (W - dw) / 2, pad + 64, dw, dh);
-  lines.forEach((l, i) => g.fillText(l.trim(), W / 2, pad + 64 + dh + 50 + i * 40));
+  if (formula) g.fillText('Molecular Formula: ' + formula, W / 2, pad + 32);
+  g.fillText('Molecular Weight: ' + mw, W / 2, pad + 32 + (formula ? 40 : 0));
+  g.drawImage(img, (W - dw) / 2, pad + top + 20, dw, dh);
+  lines.forEach((l, i) => g.fillText(l.trim(), W / 2, pad + top + 20 + dh + 50 + i * 40));
   return new Promise(ok => cv.toBlob(ok, 'image/png'));
 }
 async function blobToB64(blob) { const buf = new Uint8Array(await blob.arrayBuffer()); let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000)); return btoa(s); }
 // 형식 선택에 따라 원본·PDF 내려받기 (fmt: orig | pdf | both)
+// Google 변환용: Google 문서에 없는 글꼴을 비슷한 글꼴로 바꿈 (Word·Excel 원본은 그대로)
+const FONT_SWAP = [[/^(맑은 고딕|Malgun Gothic|돋움|Dotum|굴림|Gulim|함초롬돋움)$/i, 'Nanum Gothic'], [/^(바탕|Batang|함초롬바탕|휴먼명조|HY견명조|신명조|궁서)$/i, 'Nanum Myeongjo']];
+async function pdfFonts(blob, ext) {
+  await loadScript('jszip'); const zip = await JSZip.loadAsync(blob);
+  const files = Object.keys(zip.files).filter(p => ext === 'docx' ? /^word\/(document|styles|numbering|fontTable)\.xml$|^word\/theme\/theme\d*\.xml$/.test(p) : /^xl\/(styles|sharedStrings)\.xml$|^xl\/theme\/theme\d*\.xml$|^xl\/worksheets\/sheet\d+\.xml$/.test(p));
+  const swap = f => { for (const [re, to] of FONT_SWAP) if (re.test(f)) return to; return f; };
+  for (const p of files) { let t = await zip.file(p).async('string'); t = t.replace(/((?:w:ascii|w:hAnsi|w:eastAsia|w:cs|w:name|typeface)="|<(?:name|rFont) val=")([^"]*)"/g, (m, a, f) => a + swap(f) + '"'); zip.file(p, t); }
+  return zip.generateAsync({ type: 'blob' });
+}
 async function deliver(blob, base, ext, fmt) {
   if (fmt !== 'pdf') download(blob, base + '.' + ext);
   if (fmt === 'pdf' || fmt === 'both') {
-    const b64 = await window.serverCall('toPdf', await blobToB64(blob), ext, base);
+    const pb = (ext === 'docx' || ext === 'xlsx') ? await pdfFonts(blob, ext).catch(() => blob) : blob;
+    const b64 = await window.serverCall('toPdf', await blobToB64(pb), ext, base);
     download(new Blob([b64ToBytes(b64)], { type: 'application/pdf' }), base + '.pdf');
   }
 }
 async function buildSelfCheck(v) { const T = await templates(); return fillDocx(T.selfcheck, v); }
-async function buildCasCert(v, mol) { const T = await templates(); return fillDocx(T.cas, v, await structurePng(mol)); }
+async function buildCasCert(v, mol, stampB64) { const T = await templates(); return fillDocx(T.cas, v, { 'word/media/image1.png': await structurePng(mol), 'word/media/stamp.png': stampB64 ? b64ToBytes(stampB64) : null }); }
 
 // ---------- 통지서 읽기 ----------
 async function readNotice(file) {
