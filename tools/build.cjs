@@ -36,6 +36,12 @@ function mk(){ const h={ok:null,no:null}; const p=new Proxy({}, {get:(t,fn)=>{ i
   else if(fn==='checkUpdate') r={current:'v0.5.2',repo:window.__repo||'',latest:window.__repo?'v0.5.3':undefined,date:'2026-11-27',notes:'테스트 변경',newer:!!window.__repo};
   else if(fn==='setUpdateRepo'){ window.__repo=a[1]; r=a[1]; }
   else if(fn==='applyUpdate') r={version:'v0.5.3',files:['Code','Index','App'],versionNumber:12,url:'https://script.google.com/macros/s/X/exec'};
+  else if(fn==='hasClaudeCode') r=!!window.__cc;
+  else if(fn==='setClaudeCode'){ window.__cc=a[1]; r='저장됨'; }
+  else if(fn==='runBatchUi'){ const ops=a[1], ap=a[2]; const L=d.data['샘플']; let mx=Math.max(0,...L.map(s=>{const m=String(s['관리번호']).match(/^한인-(\d+)$/);return m?+m[1]:0;}));
+    const res=ops.map(o=>{ if(o.type==='addSample'){ const x=Object.assign({관리회사:'한인'},o.data); x['관리번호']='한인-'+(++mx); if(ap){x.id='b'+(++uid); L.push(x);} return {ok:true,type:o.type,관리번호:x['관리번호'],제품명:x['제품명'],warn:''}; }
+      const t=L.find(s=>s['관리번호']===o['관리번호']); if(!t) return {ok:false,type:o.type,error:'없음'}; const df={}; Object.keys(o.data).forEach(k=>{ if(String(t[k]||'')!==o.data[k]) df[k]={전:t[k]||'',후:o.data[k]}; }); if(ap) Object.assign(t,o.data); return {ok:true,type:o.type,관리번호:t['관리번호'],제품명:t['제품명'],바뀜:df}; });
+    r={ok:true,applied:ap,results:res,samples:ap?JSON.parse(JSON.stringify(L)):null,ships:ap?d.data['출고']:null}; }
   else if(fn==='getTemplates') r=await (await fetch('templates.json')).json();
   h.ok&&h.ok(r);}catch(e){h.no&&h.no(e)} },30); } }}); return p; }
 window.google={script:{get run(){return mk()}}};

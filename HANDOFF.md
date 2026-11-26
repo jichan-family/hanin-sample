@@ -9,3 +9,11 @@
 - 설계 문서(수정 이력·수정 대기): https://claude.ai/artifact/NaHJvKMCxWmb93kNr5ftZt
 - 앱 주소: https://script.google.com/macros/s/AKfycbx-H45kAzQLNA_t7ZCSGLUJ_UlTk5nB1b2k0f80HQZ12N2kNPj4VEmkdZoum_EYA2k/exec
 - 편집 비밀번호는 사용자가 직접 입력. 보안은 신경 쓰지 않아도 됨(회사 방침).
+
+## Claude 입력 통로 (v0.5.3~)
+- 앱 주소로 POST: {code, action:'preview'|'apply', ops:[...]}. code = 스크립트 속성 CLAUDE_CODE(사용자가 설정 → 여러 개 등록에서 정함, 대화에서 받음).
+- ops: addSample{data} · updateSample{관리번호, data} · addShipment{관리번호, data}. 구조는 tools/claude_ops.js로 계산(smiles → idcode 등).
+- 보내는 법: 내장 브라우저에 앱을 연 뒤 javascript_tool로
+  `await (await fetch(location.href.split('?')[0], {method:'POST', body: JSON.stringify(req)})).json()`
+  (본문은 문자열 → text/plain, preflight 없음). 먼저 preview로 사용자에게 보여주고 apply.
+- 기록: 시트 '입력기록'.
