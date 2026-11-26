@@ -1,0 +1,32 @@
+{
+  "version": "v0.5.2",
+  "date": "2026-11-26",
+  "notes": "앱 안에서 업데이트",
+  "files": [
+    {
+      "name": "Code",
+      "type": "SERVER_JS",
+      "path": "Code.gs"
+    },
+    {
+      "name": "Index",
+      "type": "HTML",
+      "path": "Index.html"
+    },
+    {
+      "name": "Editor",
+      "type": "HTML",
+      "path": "Editor.html"
+    },
+    {
+      "name": "Docs",
+      "type": "HTML",
+      "path": "Docs.html"
+    },
+    {
+      "name": "App",
+      "type": "HTML",
+      "path": "App.html"
+    }
+  ]
+}
