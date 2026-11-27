@@ -1,0 +1,386 @@
+<!-- 한인정밀화학 샘플 관리 — Editor.html · 버전 v0.5.8 · 최종 수정 2026-11-27 -->
+<script>
+// ---------- 구조 편집기 (자체 제작, SVG) ----------
+// 좌표 단위: 결합 길이 = 1. 화면 = 좌표 × scale + 이동값
+const EL = { H:1, B:5, C:6, N:7, O:8, F:9, Na:11, Si:14, P:15, S:16, Cl:17, K:19, Se:34, Br:35, I:53, Li:3, Al:13, Ti:22, Zn:30, Sn:50 };
+const ZEL = Object.fromEntries(Object.entries(EL).map(([k, v]) => [v, k]));
+const ECOLOR = { C:'#24292f', N:'#1f6feb', O:'#cf222e', S:'#bf8700', P:'#d4500b', F:'#1a7f37', Cl:'#119d3c', Br:'#953800', I:'#8250df', B:'#d61f69', Si:'#57606a', H:'#57606a' };
+const VAL = { C:4, N:3, O:2, S:2, P:3, B:3, Si:4, F:1, Cl:1, Br:1, I:1, H:1, Se:2 };
+const TEMPLATES = [
+  ['벤젠', 'c1ccccc1'], ['나프탈렌', 'c1ccc2ccccc2c1'], ['바이페닐', 'c1ccc(cc1)-c1ccccc1'],
+  ['플루오렌', 'C1c2ccccc2-c2ccccc12'], ['카바졸', 'c1ccc2c(c1)[nH]c1ccccc12'],
+  ['벤조트리아졸', 'c1ccc2n[nH]nc2c1'], ['이미다졸륨', 'C[n+]1ccn(C)c1'], ['피리딘', 'c1ccncc1'],
+  ['피리디늄', 'C[n+]1ccccc1'], ['페닐설포닐', 'O=S(=O)c1ccccc1'], ['아크릴레이트', 'C=CC(=O)O'], ['메타크릴레이트', 'C=C(C)C(=O)O'],
+];
+const ICON = {
+  select:'<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-dasharray="3 2" stroke-width="1.6"/></svg>',
+  b1:'<svg viewBox="0 0 24 24"><path d="M5 19L19 5" stroke="currentColor" stroke-width="2"/></svg>',
+  b2:'<svg viewBox="0 0 24 24"><path d="M4 17L17 4M7 20L20 7" stroke="currentColor" stroke-width="2"/></svg>',
+  b3:'<svg viewBox="0 0 24 24"><path d="M3 15L15 3M6 18L18 6M9 21L21 9" stroke="currentColor" stroke-width="1.8"/></svg>',
+  chain:'<svg viewBox="0 0 24 24"><path d="M2 16L7 9L12 16L17 9L22 16" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+  ar6:'<svg viewBox="0 0 24 24"><path d="M12 2L21 7V17L12 22L3 17V7Z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
+  r6:'<svg viewBox="0 0 24 24"><path d="M12 2L21 7V17L12 22L3 17V7Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
+  r5:'<svg viewBox="0 0 24 24"><path d="M12 2.5L21.5 9.5L18 21H6L2.5 9.5Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
+  r4:'<svg viewBox="0 0 24 24"><path d="M12 2L22 12L12 22L2 12Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
+  r3:'<svg viewBox="0 0 24 24"><path d="M12 3L22 20H2Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
+  plus:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 7V17M7 12H17" stroke="currentColor" stroke-width="2"/></svg>',
+  minus:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 12H17" stroke="currentColor" stroke-width="2"/></svg>',
+  erase:'<svg viewBox="0 0 24 24"><path d="M4 16L13 7L19 13L12 20H6Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 20H20" stroke="currentColor" stroke-width="1.6"/></svg>',
+  undo:'<svg viewBox="0 0 24 24"><path d="M9 7L4 12L9 17M4 12H15A5 5 0 0 1 15 22" fill="none" stroke="currentColor" stroke-width="2" transform="translate(0,-3)"/></svg>',
+  redo:'<svg viewBox="0 0 24 24"><path d="M15 7L20 12L15 17M20 12H9A5 5 0 0 0 9 22" fill="none" stroke="currentColor" stroke-width="2" transform="translate(0,-3)"/></svg>',
+  fit:'<svg viewBox="0 0 24 24"><path d="M4 9V4H9M15 4H20V9M20 15V20H15M9 20H4V15" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+};
+const HELP = {
+  select: '끌어서 사각형으로 선택 · 선택한 부분 끌기: 이동 · Delete: 선택 삭제 · Ctrl+A: 전체 선택',
+  bond: '빈 곳 클릭: 결합 추가 · 원자 클릭: 가지 추가 · 원자에서 끌기: 방향 지정 · 결합 클릭: 차수 변경',
+  chain: '빈 곳이나 원자에서 끌기: 탄소 사슬 · 끄는 동안 지그재그 미리보기와 탄소 개수(C6 등) 표시 · 방향은 30° 단위',
+  ring: '빈 곳 클릭: 고리 놓기 · 원자 클릭: 그 원자에 고리 붙이기 · 결합 클릭: 그 결합에 고리 융합',
+  el: '원자 클릭: 원소 바꾸기 · 빈 곳 클릭: 원자 추가 · 원자에서 끌기: 그 원소로 결합 추가',
+  charge: '원자 클릭: 전하 더하기',
+  erase: '원자나 결합 클릭: 지우기 · 끌기: 사각형 안 모두 지우기',
+  tpl: '빈 곳 클릭: 골격 놓기 · 원자 클릭: 그 원자에 결합으로 붙이기',
+};
+
+class MolEditor {
+  constructor(host, { fragment = false, onChange = null } = {}) {
+    this.fragment = fragment; this.onChange = onChange;
+    this.atoms = []; this.bonds = []; this.sel = new Set();
+    this.undoStack = []; this.redoStack = [];
+    this.scale = 38; this.ox = 0; this.oy = 0; this.tool = 'b1'; this.toolEl = 'N'; this.tpl = null;
+    host.classList.add('me-host');
+    host.innerHTML = `
+      <div class="me-side"></div>
+      <div class="me-main">
+        <div class="me-tpls"></div>
+        <svg class="me-svg" tabindex="0"></svg>
+        <div class="me-help"></div>
+        <div class="me-warn"></div>
+      </div>`;
+    this.side = host.querySelector('.me-side'); this.svg = host.querySelector('.me-svg');
+    this.help = host.querySelector('.me-help'); this.tplBar = host.querySelector('.me-tpls'); this.warnEl = host.querySelector('.me-warn');
+    this.buildToolbar(); this.bindEvents(); this.setTool('b1'); this.redraw();
+  }
+  // ---------- 도구 모음 ----------
+  buildToolbar() {
+    const btn = (id, html, title, cls = '') => `<button type="button" class="me-btn ${cls}" data-t="${id}" title="${title}">${html}</button>`;
+    const els = ['C', 'N', 'O', 'S', 'P', 'F', 'Cl', 'Br', 'I', 'B', 'Si', 'H'];
+    this.side.innerHTML =
+      `<div class="me-grp">${btn('select', ICON.select, '선택 (끌어서 사각형 선택)')}${btn('erase', ICON.erase, '지우개')}</div>
+       <div class="me-grp">${btn('b1', ICON.b1, '단일결합')}${btn('b2', ICON.b2, '이중결합')}${btn('b3', ICON.b3, '삼중결합')}${btn('chain', ICON.chain, '사슬')}</div>
+       <div class="me-grp">${btn('ar6', ICON.ar6, '벤젠')}${btn('r6', ICON.r6, '6각 고리')}${btn('r5', ICON.r5, '5각 고리')}${btn('r4', ICON.r4, '4각 고리')}${btn('r3', ICON.r3, '3각 고리')}</div>
+       <div class="me-grp me-els">${els.map(e => btn('el:' + e, `<b style="color:${ECOLOR[e]}">${e}</b>`, e + ' 원자')).join('')}</div>
+       <div class="me-grp">${btn('plus', ICON.plus, '양전하 (+)')}${btn('minus', ICON.minus, '음전하 (−)')}</div>
+       <div class="me-grp">${btn('undo', ICON.undo, '되돌리기 (Ctrl+Z)', 'act')}${btn('redo', ICON.redo, '다시 실행 (Ctrl+Y)', 'act')}${btn('fit', ICON.fit, '화면에 맞추기', 'act')}</div>
+       ${this.fragment ? '' : '<button type="button" class="me-btn me-clear act" data-t="tidy" title="원자 배치를 켐드로우처럼 보기 좋게 다시 잡습니다">구조 정리</button>'}
+       <button type="button" class="me-btn me-clear act" data-t="clear" title="모두 지우기">모두 지우기</button>`;
+    this.tplBar.innerHTML = '<span class="me-tlabel">골격</span>' + TEMPLATES.map((t, i) => `<button type="button" class="me-tpl" data-tpl="${i}">${t[0]}</button>`).join('');
+    this.side.addEventListener('click', e => {
+      const b = e.target.closest('[data-t]'); if (!b) return;
+      const t = b.dataset.t;
+      if (t === 'undo') return this.undo(); if (t === 'redo') return this.redo();
+      if (t === 'fit') { this.fit(); return this.redraw(); }
+      if (t === 'tidy') { if (this.isEmpty()) return; b.disabled = true; window.tidyMol(this.getMolecule()).then(m => this.setMolecule(m)).catch(er => alert(er.message || er)).finally(() => { b.disabled = false; }); return; }
+      if (t === 'clear') { this.push(); this.atoms = []; this.bonds = []; this.sel.clear(); return this.changed(); }
+      this.setTool(t);
+    });
+    this.tplBar.addEventListener('click', e => { const b = e.target.closest('[data-tpl]'); if (b) this.setTool('tpl', +b.dataset.tpl); });
+  }
+  setTool(t, tpl) {
+    if (t.startsWith('el:')) { this.toolEl = t.slice(3); t = 'el'; }
+    this.tool = t; this.tpl = t === 'tpl' ? tpl : null;
+    this.side.querySelectorAll('[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === t || (t === 'el' && b.dataset.t === 'el:' + this.toolEl)));
+    this.tplBar.querySelectorAll('[data-tpl]').forEach(b => b.classList.toggle('on', t === 'tpl' && +b.dataset.tpl === tpl));
+    const kind = ['b1', 'b2', 'b3'].includes(t) ? 'bond' : ['ar6', 'r6', 'r5', 'r4', 'r3'].includes(t) ? 'ring' : ['plus', 'minus'].includes(t) ? 'charge' : t;
+    this.help.textContent = (HELP[kind] || '') + ' · Ctrl+Z 되돌리기 / Ctrl+Y 다시 실행';
+    if (t !== 'select') { this.sel.clear(); this.redraw(); }
+  }
+  // ---------- 상태 ----------
+  snapshot() { return JSON.stringify([this.atoms, this.bonds]); }
+  push() { this.undoStack.push(this.snapshot()); if (this.undoStack.length > 100) this.undoStack.shift(); this.redoStack = []; }
+  undo() { if (!this.undoStack.length) return; this.redoStack.push(this.snapshot()); [this.atoms, this.bonds] = JSON.parse(this.undoStack.pop()); this.sel.clear(); this.changed(); }
+  redo() { if (!this.redoStack.length) return; this.undoStack.push(this.snapshot()); [this.atoms, this.bonds] = JSON.parse(this.redoStack.pop()); this.sel.clear(); this.changed(); }
+  changed() { this.redraw(); if (this.onChange) this.onChange(); }
+  isEmpty() { return this.atoms.length === 0; }
+  clearAll() { this.atoms = []; this.bonds = []; this.sel.clear(); this.undoStack = []; this.redoStack = []; this.redraw(); }
+  // ---------- 기하 ----------
+  toModel(ev) { const r = this.svg.getBoundingClientRect(); return { x: (ev.clientX - r.left - this.ox) / this.scale, y: (ev.clientY - r.top - this.oy) / this.scale }; }
+  sx(x) { return x * this.scale + this.ox; } sy(y) { return y * this.scale + this.oy; }
+  nbrs(i) { const out = []; this.bonds.forEach(b => { if (b.a === i) out.push(b.b); else if (b.b === i) out.push(b.a); }); return out; }
+  bondBetween(i, j) { return this.bonds.findIndex(b => (b.a === i && b.b === j) || (b.a === j && b.b === i)); }
+  hitAtom(p) { let best = -1, bd = 0.32; this.atoms.forEach((a, i) => { const d = Math.hypot(a.x - p.x, a.y - p.y); if (d < bd) { bd = d; best = i; } }); return best; }
+  hitBond(p) {
+    let best = -1, bd = 0.2;
+    this.bonds.forEach((b, i) => {
+      const A = this.atoms[b.a], B = this.atoms[b.b]; const dx = B.x - A.x, dy = B.y - A.y; const L = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((p.x - A.x) * dx + (p.y - A.y) * dy) / L)); const d = Math.hypot(A.x + t * dx - p.x, A.y + t * dy - p.y);
+      if (d < bd && t > 0.15 && t < 0.85) { bd = d; best = i; }
+    });
+    return best;
+  }
+  near(x, y, tol = 0.3) { return this.atoms.findIndex(a => Math.hypot(a.x - x, a.y - y) < tol); }
+  addAtom(x, y, el = 'C') { const j = this.near(x, y); if (j >= 0) return j; this.atoms.push({ x, y, el, q: 0 }); return this.atoms.length - 1; }
+  addBond(i, j, o = 1) { if (i === j) return -1; const k = this.bondBetween(i, j); if (k >= 0) return k; this.bonds.push({ a: i, b: j, o }); return this.bonds.length - 1; }
+  freeAngle(i) {
+    const A = this.atoms[i], ns = this.nbrs(i).map(j => Math.atan2(this.atoms[j].y - A.y, this.atoms[j].x - A.x));
+    if (!ns.length) return -Math.PI / 6;
+    if (ns.length === 1) {
+      const cands = [ns[0] + 2 * Math.PI / 3, ns[0] - 2 * Math.PI / 3];
+      // 지그재그 유지: 이웃의 반대편 이웃과 같은 쪽을 고름
+      const j = this.nbrs(i)[0], far = this.nbrs(j).filter(k => k !== i);
+      if (far.length) { const F = this.atoms[far[0]]; return cands.sort((a, b) => Math.hypot(A.x + Math.cos(b) - F.x, A.y + Math.sin(b) - F.y) - Math.hypot(A.x + Math.cos(a) - F.x, A.y + Math.sin(a) - F.y))[0]; }
+      return cands.sort((a, b) => Math.abs(Math.sin(a) + 0.5) - Math.abs(Math.sin(b) + 0.5))[0];
+    }
+    const s = ns.map(a => (a + 2 * Math.PI) % (2 * Math.PI)).sort((a, b) => a - b);
+    let gap = 0, at = 0; s.forEach((a, k) => { const n = k + 1 < s.length ? s[k + 1] : s[0] + 2 * Math.PI; if (n - a > gap) { gap = n - a; at = a + gap / 2; } });
+    return at;
+  }
+  branch(i, o = 1, el = 'C', ang) {
+    const A = this.atoms[i]; const a = ang ?? this.freeAngle(i);
+    const j = this.addAtom(A.x + Math.cos(a), A.y + Math.sin(a), el); this.addBond(i, j, o); return j;
+  }
+  ringPoints(n, cx, cy, start) { const R = 1 / (2 * Math.sin(Math.PI / n)); return Array.from({ length: n }, (_, k) => ({ x: cx + R * Math.cos(start + 2 * Math.PI * k / n), y: cy + R * Math.sin(start + 2 * Math.PI * k / n) })); }
+  makeRing(pts, aromatic) {
+    const idx = pts.map(p => this.addAtom(p.x, p.y)); const bs = [];
+    for (let k = 0; k < idx.length; k++) bs.push(this.addBond(idx[k], idx[(k + 1) % idx.length], 1));
+    if (aromatic) {
+      const hasDouble = i => this.bonds.some((b, bi) => !bs.includes(bi) && (b.a === i || b.b === i) && b.o === 2);
+      for (const off of [0, 1]) {
+        const ok = bs.every((bi, k) => (k % 2 !== off) || (!hasDouble(this.bonds[bi].a) && !hasDouble(this.bonds[bi].b)));
+        if (ok || off === 1) { bs.forEach((bi, k) => { if (k % 2 === off && !hasDouble(this.bonds[bi].a) && !hasDouble(this.bonds[bi].b)) this.bonds[bi].o = 2; }); break; }
+      }
+    }
+  }
+  placeRing(n, aromatic, p) {
+    const ai = this.hitAtom(p), bi = ai < 0 ? this.hitBond(p) : -1;
+    if (bi >= 0) { // 결합에 융합
+      const b = this.bonds[bi], A = this.atoms[b.a], B = this.atoms[b.b];
+      const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2, nx = -(B.y - A.y), ny = B.x - A.x;
+      const side = this.atoms.reduce((s, a, k) => k === b.a || k === b.b ? s : s + Math.sign((a.x - mx) * nx + (a.y - my) * ny), 0);
+      const dir = side > 0 ? -1 : 1, d = 1 / (2 * Math.tan(Math.PI / n));
+      const cx = mx + dir * nx * d, cy = my + dir * ny * d;
+      return this.makeRing(this.ringPoints(n, cx, cy, Math.atan2(A.y - cy, A.x - cx)), aromatic);
+    }
+    if (ai >= 0) { // 원자에 붙이기
+      const A = this.atoms[ai], a = this.freeAngle(ai), R = 1 / (2 * Math.sin(Math.PI / n));
+      const cx = A.x + Math.cos(a) * R, cy = A.y + Math.sin(a) * R;
+      return this.makeRing(this.ringPoints(n, cx, cy, a + Math.PI), aromatic);
+    }
+    this.makeRing(this.ringPoints(n, p.x, p.y, -Math.PI / 2 + (n % 2 ? 0 : Math.PI / n)), aromatic);
+  }
+  placeTemplate(k, p) {
+    const m = window.S.OCL.Molecule.fromSmiles(TEMPLATES[k][1]);
+    const t = this.fromOCL(m); if (!t.atoms.length) return;
+    const ai = this.hitAtom(p); let dx, dy, rot = 0, anchor = 0;
+    // 붙일 원자: 첫 원자(아크릴레이트·설포닐은 끝 원자)
+    const tb = t.bonds; const deg = i => tb.filter(b => b.a === i || b.b === i).length;
+    if (ai >= 0) {
+      anchor = t.atoms.findIndex((a, i) => a.el === 'C' && deg(i) < 3); if (anchor < 0) anchor = 0;
+      const A = this.atoms[ai], ang = this.freeAngle(ai), tx = A.x + Math.cos(ang), ty = A.y + Math.sin(ang);
+      const T = t.atoms[anchor], cx = t.atoms.reduce((s, a) => s + a.x, 0) / t.atoms.length, cy = t.atoms.reduce((s, a) => s + a.y, 0) / t.atoms.length;
+      rot = ang - Math.atan2(cy - T.y, cx - T.x);
+      const r = (x, y) => ({ x: (x - T.x) * Math.cos(rot) - (y - T.y) * Math.sin(rot) + tx, y: (x - T.x) * Math.sin(rot) + (y - T.y) * Math.cos(rot) + ty });
+      t.atoms.forEach(a => Object.assign(a, r(a.x, a.y)));
+    } else {
+      const cx = t.atoms.reduce((s, a) => s + a.x, 0) / t.atoms.length, cy = t.atoms.reduce((s, a) => s + a.y, 0) / t.atoms.length;
+      t.atoms.forEach(a => { a.x += p.x - cx; a.y += p.y - cy; });
+    }
+    const map = t.atoms.map(a => { const i = this.addAtom(a.x, a.y, a.el); this.atoms[i].el = a.el; this.atoms[i].q = a.q; return i; });
+    t.bonds.forEach(b => { const bi = this.addBond(map[b.a], map[b.b], b.o); this.bonds[bi].o = b.o; });
+    if (ai >= 0) this.addBond(ai, map[anchor], 1);
+  }
+  deleteAtoms(set) {
+    const keep = this.atoms.map((_, i) => !set.has(i)); const re = []; let n = 0; keep.forEach((k, i) => re[i] = k ? n++ : -1);
+    this.bonds = this.bonds.filter(b => keep[b.a] && keep[b.b]).map(b => ({ ...b, a: re[b.a], b: re[b.b] }));
+    this.atoms = this.atoms.filter((_, i) => keep[i]); this.sel.clear();
+  }
+  pruneLonely(cands) { const lone = new Set(cands.filter(i => i < this.atoms.length && this.atoms[i].el === 'C' && !this.nbrs(i).length && !this.atoms[i].q)); if (lone.size) this.deleteAtoms(lone); }
+  // ---------- 마우스 ----------
+  bindEvents() {
+    const svg = this.svg; let drag = null;
+    svg.addEventListener('pointerdown', ev => {
+      svg.focus(); svg.setPointerCapture(ev.pointerId);
+      const p = this.toModel(ev); drag = { p0: p, p, ai: this.hitAtom(p), bi: -1, moved: false };
+      if (drag.ai < 0) drag.bi = this.hitBond(p);
+      if (this.tool === 'select' && drag.ai >= 0 && this.sel.has(drag.ai)) { this.push(); drag.move = true; }
+      else if (this.tool === 'select' && drag.ai >= 0) { this.sel = new Set([drag.ai]); this.push(); drag.move = true; this.redraw(); }
+    });
+    svg.addEventListener('pointermove', ev => {
+      const p = this.toModel(ev);
+      if (!drag) { const h = this.hitAtom(p); const hb = h < 0 ? this.hitBond(p) : -1; if (h !== this.hover || hb !== this.hoverB) { this.hover = h; this.hoverB = hb; this.redraw(); } return; }
+      if (Math.hypot(p.x - drag.p0.x, p.y - drag.p0.y) > 0.2) drag.moved = true;
+      if (drag.move) { const dx = p.x - drag.p.x, dy = p.y - drag.p.y; this.sel.forEach(i => { this.atoms[i].x += dx; this.atoms[i].y += dy; }); drag.p = p; this.redraw(); return; }
+      drag.p = p; this.redraw(drag);
+    });
+    svg.addEventListener('pointerup', ev => {
+      if (!drag) return; const d = drag; drag = null; const p = this.toModel(ev);
+      if (d.move) { if (!d.moved) this.undoStack.pop(); this.changed(); return; }
+      this.act(d, p);
+    });
+    svg.addEventListener('pointerleave', () => { this.hover = -1; this.hoverB = -1; if (!drag) this.redraw(); });
+    svg.addEventListener('keydown', ev => {
+      const k = ev.key.toLowerCase();
+      if ((ev.ctrlKey || ev.metaKey) && k === 'z') { ev.preventDefault(); this.undo(); }
+      else if ((ev.ctrlKey || ev.metaKey) && (k === 'y' || (ev.shiftKey && k === 'z'))) { ev.preventDefault(); this.redo(); }
+      else if ((ev.ctrlKey || ev.metaKey) && k === 'a') { ev.preventDefault(); this.setTool('select'); this.sel = new Set(this.atoms.map((_, i) => i)); this.redraw(); }
+      else if ((k === 'delete' || k === 'backspace') && this.sel.size) { ev.preventDefault(); this.push(); this.deleteAtoms(this.sel); this.changed(); }
+      else if (k === 'escape') { this.sel.clear(); this.redraw(); }
+    });
+    new ResizeObserver(() => this.redraw()).observe(this.svg);
+  }
+  rectSet(a, b) { const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y); return new Set(this.atoms.map((t, i) => t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1 ? i : -1).filter(i => i >= 0)); }
+  chainPoints(A, p, ai = -1) {
+    // 30° 단위로 방향을 맞추고, 결합 하나당 진행 거리 cos30° 로 개수 계산
+    const L = Math.hypot(p.x - A.x, p.y - A.y); if (L < 0.4) return [];
+    const base = this.snapAngle(A, p), n = Math.max(1, Math.round(L / 0.866));
+    let sgn = 1;
+    if (ai >= 0) { const nb = this.nbrs(ai)[0]; if (nb != null) { const B = this.atoms[nb]; const cross = Math.cos(base) * (B.y - A.y) - Math.sin(base) * (B.x - A.x); sgn = cross > 0 ? 1 : -1; } }
+    const pts = []; let x = A.x, y = A.y;
+    for (let k = 0; k < n; k++) { const a = base + (k % 2 ? sgn : -sgn) * Math.PI / 6; x += Math.cos(a); y += Math.sin(a); pts.push({ x, y }); }
+    return pts;
+  }
+  valenceIssues() {
+    const bad = new Map();
+    this.atoms.forEach((a, i) => {
+      if (a.el === 'C' && a.q > 0) { bad.set(i, '탄소에 + 전하 (카보양이온) — 의도한 것인지 확인'); return; }
+      const v = VAL[a.el]; if (v == null) return;
+      let used = 0; this.bonds.forEach(b => { if (b.a === i || b.b === i) used += b.o; });
+      let val = v + (['N', 'P', 'O', 'S'].includes(a.el) ? a.q : a.el === 'B' ? -a.q : a.el === 'C' ? -Math.abs(a.q) : 0);
+      if (['S', 'P'].includes(a.el)) { const mx = a.el === 'S' ? 6 : 5; if (used > mx + Math.max(0, a.q)) bad.set(i, a.el + ' 원자가 초과'); return; }
+      if (used > val) bad.set(i, `${a.el} 원자가 초과 (결합 ${used} > ${val})` + (a.el === 'N' && !a.q ? ' — N⁺ 이면 + 전하를 붙이세요' : ''));
+    });
+    return bad;
+  }
+  snapAngle(A, p) { const a = Math.atan2(p.y - A.y, p.x - A.x); return Math.round(a / (Math.PI / 6)) * (Math.PI / 6); }
+  act(d, p) {
+    const t = this.tool, { ai, bi } = d;
+    if (t === 'select') { this.sel = d.moved ? this.rectSet(d.p0, p) : new Set(); return this.redraw(); }
+    if (t === 'erase') {
+      this.push();
+      if (d.moved) { const s = this.rectSet(d.p0, p); if (s.size) this.deleteAtoms(s); else this.undoStack.pop(); }
+      else if (ai >= 0) this.deleteAtoms(new Set([ai]));
+      else if (bi >= 0) { const b = this.bonds[bi]; this.bonds.splice(bi, 1); this.pruneLonely([b.a, b.b]); }
+      else { this.undoStack.pop(); return; }
+      return this.changed();
+    }
+    this.push();
+    if (['b1', 'b2', 'b3'].includes(t)) {
+      const o = +t[1];
+      if (bi >= 0 && !d.moved) { const b = this.bonds[bi]; b.o = t === 'b1' ? (b.o % 3) + 1 : (b.o === o ? 1 : o); }
+      else if (ai >= 0 && d.moved) { const A = this.atoms[ai], a = this.snapAngle(A, p); const tgt = this.hitAtom(p); if (tgt >= 0 && tgt !== ai) this.addBond(ai, tgt, o); else this.branch(ai, o, 'C', a); }
+      else if (ai >= 0) this.branch(ai, o);
+      else { const i = this.addAtom(p.x - 0.43, p.y + 0.25); this.branch(i, o, 'C', -Math.PI / 6); }
+    } else if (t === 'chain') {
+      const start = ai >= 0 ? this.atoms[ai] : d.p0;
+      const pts = this.chainPoints(start, p, ai);
+      if (!pts.length) { this.undoStack.pop(); return; }
+      let i = ai >= 0 ? ai : this.addAtom(start.x, start.y);
+      pts.forEach(q => { const j = this.addAtom(q.x, q.y); this.addBond(i, j, 1); i = j; });
+    } else if (['ar6', 'r6', 'r5', 'r4', 'r3'].includes(t)) {
+      this.placeRing(t === 'ar6' ? 6 : +t[1], t === 'ar6', p);
+    } else if (t === 'el') {
+      if (ai >= 0 && d.moved) { const a = this.snapAngle(this.atoms[ai], p); this.branch(ai, 1, this.toolEl, a); }
+      else if (ai >= 0) { this.atoms[ai].el = this.toolEl; }
+      else this.addAtom(p.x, p.y, this.toolEl);
+    } else if (t === 'plus' || t === 'minus') {
+      if (ai >= 0) this.atoms[ai].q += t === 'plus' ? 1 : -1; else { this.undoStack.pop(); return; }
+    } else if (t === 'tpl') { this.placeTemplate(this.tpl, p); }
+    this.changed();
+  }
+  // ---------- 그리기 ----------
+  hCount(i) {
+    const a = this.atoms[i], v = VAL[a.el]; if (v == null) return 0;
+    let used = 0; this.bonds.forEach(b => { if (b.a === i || b.b === i) used += b.o; });
+    let val = v; if (['N', 'P'].includes(a.el)) val += a.q; else if (['O', 'S'].includes(a.el)) val += a.q; else if (a.el === 'C') val -= Math.abs(a.q); else if (a.el === 'B') val -= a.q;
+    if (['S', 'P'].includes(a.el)) while (used > val) val += 2;
+    return Math.max(0, val - used);
+  }
+  fit() {
+    const w = this.svg.clientWidth || 600, h = this.svg.clientHeight || 360;
+    if (!this.atoms.length) { this.scale = 38; this.ox = w / 2; this.oy = h / 2; return; }
+    const xs = this.atoms.map(a => a.x), ys = this.atoms.map(a => a.y);
+    const bw = Math.max(...xs) - Math.min(...xs) || 1, bh = Math.max(...ys) - Math.min(...ys) || 1;
+    this.scale = Math.max(8, Math.min(38, (w - 60) / bw, (h - 50) / bh));
+    this.ox = w / 2 - (Math.max(...xs) + Math.min(...xs)) / 2 * this.scale; this.oy = h / 2 - (Math.max(...ys) + Math.min(...ys)) / 2 * this.scale;
+  }
+  redraw(drag) {
+    const w = this.svg.clientWidth, h = this.svg.clientHeight; if (!w) return;
+    if (!this.inited) { this.inited = true; this.fit(); }
+    this.svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    const S = this.scale, out = [];
+    const ringCenter = (bi) => { // 이중결합 안쪽선 방향: 고리 중심 쪽
+      const b = this.bonds[bi]; const na = this.nbrs(b.a).filter(k => k !== b.b), nb = this.nbrs(b.b).filter(k => k !== b.a);
+      const pts = [...na, ...nb].map(k => this.atoms[k]); if (!pts.length) return null;
+      return { x: pts.reduce((s, a) => s + a.x, 0) / pts.length, y: pts.reduce((s, a) => s + a.y, 0) / pts.length };
+    };
+    const labeled = i => { const a = this.atoms[i]; return a.el !== 'C' || a.q || !this.nbrs(i).length; };
+    this.bonds.forEach((b, bi) => {
+      const A = this.atoms[b.a], B = this.atoms[b.b];
+      let x1 = this.sx(A.x), y1 = this.sy(A.y), x2 = this.sx(B.x), y2 = this.sy(B.y);
+      const L = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / L, uy = (y2 - y1) / L, px = -uy, py = ux;
+      const cut = S * 0.3; if (labeled(b.a)) { x1 += ux * cut; y1 += uy * cut; } if (labeled(b.b)) { x2 -= ux * cut; y2 -= uy * cut; }
+      const hl = bi === this.hoverB, col = hl ? '#0b5cad' : '#24292f', sw = hl ? 2.6 : 1.6;
+      const line = (dx, dy, sh = 0) => out.push(`<line x1="${x1 + dx + ux * sh}" y1="${y1 + dy + uy * sh}" x2="${x2 + dx - ux * sh}" y2="${y2 + dy - uy * sh}" stroke="${col}" stroke-width="${sw}" stroke-linecap="round"/>`);
+      const g = S * 0.16;
+      if (b.o === 1) line(0, 0);
+      else if (b.o === 2) {
+        const c = ringCenter(bi), inner = c && (this.nbrs(b.a).length > 1 && this.nbrs(b.b).length > 1);
+        if (inner) { const s = Math.sign((this.sx(c.x) - x1) * px + (this.sy(c.y) - y1) * py) || 1; line(0, 0); line(px * g * s, py * g * s, S * 0.14); }
+        else { line(px * g / 2, py * g / 2); line(-px * g / 2, -py * g / 2); }
+      } else { line(0, 0); line(px * g, py * g); line(-px * g, -py * g); }
+    });
+    this.atoms.forEach((a, i) => {
+      const x = this.sx(a.x), y = this.sy(a.y), sel = this.sel.has(i), hv = i === this.hover;
+      if (sel) out.push(`<circle cx="${x}" cy="${y}" r="${S * 0.32}" fill="#ddf4ff" stroke="#0b5cad" stroke-width="1"/>`);
+      if (hv) out.push(`<circle cx="${x}" cy="${y}" r="${S * 0.3}" fill="none" stroke="#0b5cad" stroke-width="1.5"/>`);
+      if (!labeled(i)) return;
+      const hc = this.hCount(i), fs = Math.max(10, S * 0.42);
+      const txt = a.el + (hc ? 'H' + (hc > 1 ? `<tspan font-size="${fs * 0.7}" dy="${fs * 0.25}">${hc}</tspan>` : '') : '');
+      const qs = a.q ? (Math.abs(a.q) > 1 ? Math.abs(a.q) : '') + (a.q > 0 ? '+' : '−') : '';
+      out.push(`<text x="${x}" y="${y + fs * 0.36}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="${ECOLOR[a.el] || '#24292f'}" stroke="#fff" stroke-width="4" paint-order="stroke">${txt}</text>`);
+      if (qs) out.push(`<text x="${x + fs * (0.55 + (hc ? 0.5 : 0))}" y="${y - fs * 0.25}" font-size="${fs * 0.75}" font-weight="700" fill="#24292f" stroke="#fff" stroke-width="3" paint-order="stroke">${qs}</text>`);
+    });
+    if (drag && drag.moved && (this.tool === 'select' || this.tool === 'erase')) {
+      const x0 = this.sx(Math.min(drag.p0.x, drag.p.x)), y0 = this.sy(Math.min(drag.p0.y, drag.p.y));
+      out.push(`<rect x="${x0}" y="${y0}" width="${Math.abs(drag.p.x - drag.p0.x) * S}" height="${Math.abs(drag.p.y - drag.p0.y) * S}" fill="${this.tool === 'erase' ? 'rgba(207,34,46,.08)' : 'rgba(11,92,173,.08)'}" stroke="${this.tool === 'erase' ? '#cf222e' : '#0b5cad'}" stroke-dasharray="4 3"/>`);
+    } else if (drag && drag.moved && drag.ai >= 0 && ['b1', 'b2', 'b3', 'el'].includes(this.tool)) {
+      const A = this.atoms[drag.ai], an = this.snapAngle(A, drag.p);
+      out.push(`<line x1="${this.sx(A.x)}" y1="${this.sy(A.y)}" x2="${this.sx(A.x + Math.cos(an))}" y2="${this.sy(A.y + Math.sin(an))}" stroke="#0b5cad" stroke-width="2" stroke-dasharray="4 3"/>`);
+    } else if (drag && drag.moved && this.tool === 'chain') {
+      const A = drag.ai >= 0 ? this.atoms[drag.ai] : drag.p0, pts = this.chainPoints(A, drag.p, drag.ai);
+      if (pts.length) {
+        const all = [A, ...pts];
+        out.push(`<polyline points="${all.map(q => this.sx(q.x) + ',' + this.sy(q.y)).join(' ')}" fill="none" stroke="#0b5cad" stroke-width="2.2" stroke-linejoin="round" opacity=".75"/>`);
+        all.forEach(q => out.push(`<circle cx="${this.sx(q.x)}" cy="${this.sy(q.y)}" r="2.6" fill="#0b5cad"/>`));
+        const E = pts[pts.length - 1], cnt = pts.length + (drag.ai >= 0 ? 0 : 1);
+        out.push(`<g><rect x="${this.sx(E.x) + 10}" y="${this.sy(E.y) - 24}" width="${String(cnt).length * 9 + 22}" height="22" rx="6" fill="#0b5cad"/><text x="${this.sx(E.x) + 21}" y="${this.sy(E.y) - 8}" font-size="14" font-weight="700" fill="#fff">C${cnt}</text></g>`);
+      }
+    }
+    const bad = this.valenceIssues(); this.badAtoms = bad;
+    bad.forEach((msg, i) => { const a = this.atoms[i]; if (a) out.push(`<circle cx="${this.sx(a.x)}" cy="${this.sy(a.y)}" r="${S * 0.42}" fill="none" stroke="#cf222e" stroke-width="2" stroke-dasharray="3 2"><title>${msg}</title></circle>`); });
+    if (this.warnEl) this.warnEl.textContent = bad.size ? '⚠ ' + [...new Set(bad.values())].join(' · ') : '';
+    if (!this.atoms.length) out.push(`<text x="${w / 2}" y="${h / 2}" text-anchor="middle" fill="#8c959f" font-size="14">여기에 그리거나, ChemDraw에서 Copy As → SMILES로 복사해 Ctrl+V 하세요</text>`);
+    this.svg.innerHTML = out.join('');
+  }
+  // ---------- OpenChemLib 변환 ----------
+  fromOCL(m) {
+    const atoms = [], bonds = []; const n = m.getAllAtoms(); if (!n) return { atoms, bonds };
+    let L = m.getAverageBondLength(true) || 1; if (!isFinite(L) || L <= 0) L = 1;
+    for (let i = 0; i < n; i++) atoms.push({ x: m.getAtomX(i) / L, y: m.getAtomY(i) / L, el: m.getAtomLabel(i) || 'C', q: m.getAtomCharge(i) });
+    for (let b = 0; b < m.getAllBonds(); b++) bonds.push({ a: m.getBondAtom(0, b), b: m.getBondAtom(1, b), o: Math.min(3, Math.max(1, m.getBondOrder(b))) });
+    return { atoms, bonds };
+  }
+  setMolecule(m, noUndo) {
+    if (!noUndo) this.push(); const t = this.fromOCL(m); this.atoms = t.atoms; this.bonds = t.bonds; this.sel.clear(); this.fit(); this.changed();
+  }
+  getMolecule() {
+    const M = window.S.OCL.Molecule, m = new M(this.atoms.length, this.bonds.length);
+    this.atoms.forEach(a => { const i = m.addAtom(EL[a.el] ?? 6); m.setAtomX(i, a.x * 1.5); m.setAtomY(i, a.y * 1.5); if (a.q) m.setAtomCharge(i, a.q); });
+    const T = { 1: M.cBondTypeSingle, 2: M.cBondTypeDouble, 3: M.cBondTypeTriple };
+    this.bonds.forEach(b => { const k = m.addBond(b.a, b.b); m.setBondType(k, T[b.o]); });
+    m.setFragment(this.fragment); m.ensureHelperArrays(M.cHelperRings);
+    return m;
+  }
+}
+window.MolEditor = MolEditor;
+
+</script>

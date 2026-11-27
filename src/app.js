@@ -274,6 +274,35 @@ function sampleStatus(sid) {
 }
 const kindsOf = s => String(s['종류'] || '').replace(/단물질/g, '단분자').replace(/이온성액체/g, '이온성물질').split(',').map(x => x.trim()).filter(Boolean);
 
+// 목록 엑셀로 받기(누구나): 지금 화면에 걸러진 목록
+async function svgPng(svg, w, h) {
+  const img = new Image(), url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  await new Promise((ok, no) => { img.onload = ok; img.onerror = no; img.src = url; });
+  const c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+  return c.toDataURL('image/png');
+}
+window.exportList = () => busy(async () => {
+  const L = S.list || [], withStr = $('xlStruct').checked; if (!L.length) { toast('받을 샘플이 없습니다.', false); return; }
+  await Docs.loadScript('exceljs'); if (withStr) await loadOCL();
+  const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('샘플 목록', { views: [{ state: 'frozen', ySplit: 1 }] });
+  const cols = [...(withStr ? [['구조', 26]] : []), ['관리번호', 14], ['제품명', 22], ['물질명', 40], ['CAS', 13], ['종류', 10], ['분자식', 16], ['분자량', 9], ['용도', 28], ['관리회사', 14], ['명의', 14], ['고객사', 16], ['신고면제', 30], ['출고 기록', 36], ['등록일', 11]];
+  ws.columns = cols.map(([h, w]) => ({ header: h, width: w }));
+  const hr = ws.getRow(1); hr.font = { bold: true, color: { argb: 'FFFFFFFF' } }; hr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3B73' } }; hr.alignment = { vertical: 'middle', horizontal: 'center' }; hr.height = 22;
+  for (let i = 0; i < L.length; i++) {
+    const s = L[i], ex = exOf(s.id).map(e => { const st = exState(e); return `${e['기관'] || ''} ${st.txt}${e['면제번호'] ? ` (${e['면제번호']})` : ''}`.trim(); }).join('\n');
+    const sh = shipsOf(s.id).map(x => [x['출고일'], x['고객사'], x['수량'], x['가격'] ? priceText(x['가격']) : ''].filter(Boolean).join(' ')).join('\n');
+    const v = [s['관리번호'], s['제품명'], s['물질명'], s['CAS'], kindsOf(s).join(', '), s['분자식'], s['분자량'] ? +s['분자량'] || s['분자량'] : '', s['용도'], coFull(s['관리회사'] || ''), namesOf(s).map(coFull).join(', '), s['고객사'], ex, sh, String(s['등록일'] || '').slice(0, 10)].map(x => x == null ? '' : x);
+    const row = ws.addRow(withStr ? ['', ...v] : v); row.alignment = { vertical: 'middle', wrapText: true };
+    const lines = Math.max(1, ex.split('\n').length, sh.split('\n').length, Math.ceil(String(s['물질명'] || '').length / 45));
+    row.height = withStr ? 90 : Math.max(18, 15 * lines + 4);
+    if (withStr) { const m = molOf(s); if (m) { if (i % 20 === 0) toast(`구조 그림 넣는 중… ${i + 1}/${L.length}`); const png = await svgPng(svgOf(m, 180, 116), 180, 116); ws.addImage(wb.addImage({ base64: png, extension: 'png' }), { tl: { col: 0.1, row: i + 1.1 }, ext: { width: 176, height: 113 }, editAs: 'oneCell' }); } }
+  }
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+  const buf = await wb.xlsx.writeBuffer();
+  Docs.download(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `샘플목록_${Docs.safeName(S.tab === '전체' ? '전체' : coFull(S.tab))}_${S.today.replace(/-/g, '')}.xlsx`);
+  closeModal('xlBox'); toast(`${L.length}건 받음`);
+}, '만드는 중…');
+
 // ---------- 목록 ----------
 function inTab(s, t) {
   if (t === '전체') return true;
@@ -308,6 +337,7 @@ function render() {
   else if (S.sort === 'num') L.sort((a, b) => companyOf(a).localeCompare(companyOf(b), 'ko') || numKey(a) - numKey(b));
   else L.sort((a, b) => { const ao = a['출처'] === '기존 자료', bo = b['출처'] === '기존 자료'; if (ao !== bo) return ao ? 1 : -1; if (ao) return numKey(b) - numKey(a); return (b['등록일'] || '').localeCompare(a['등록일'] || ''); });
   if (q && /^\S+-\d+$/.test(q)) L.sort((a, b) => ((b['관리번호'] || '').toLowerCase() === q) - ((a['관리번호'] || '').toLowerCase() === q));
+  S.list = L;
   $('status').textContent = `${L.length}건` + (S.hits ? ` · 구조 검색 결과 (${{ sub: '부분구조', exact: '완전일치', sim: '유사구조' }[S.hitMode]})` : '');
   $('grid').innerHTML = L.map(s => {
     const h = S.hits && S.hits.get(s.id), st = sampleStatus(s.id);
@@ -530,7 +560,7 @@ window.recordSubmit = () => busy(async () => {
 // ---------- 편집 모드 (계속 기억) ----------
 function setEditing(on) { document.body.classList.toggle('editing', on); if (on && !S.updChecked) { S.updChecked = true; setTimeout(() => checkUpd(false), 1500); } $('lockBtn').innerHTML = on ? '🔓 <span class="t">편집 중</span>' : '🔒 <span class="t">편집</span>'; }
 window.toggleEdit = () => {
-  if (S.pw) { S.pw = null; try { localStorage.removeItem('sm_pw'); } catch (e) {} setEditing(false); if (S.view === 'msds' || S.view === 'settings') { closeAllModals(); showView('list'); } else if ($('detail').classList.contains('open')) renderDetail(); return; }
+  if (S.pw) { S.pw = null; try { localStorage.removeItem('sm_pw'); } catch (e) {} setEditing(false); if (S.view === 'msds' || S.view === 'settings' || S.view === 'partners') { closeAllModals(); showView('list'); } else if ($('detail').classList.contains('open')) renderDetail(); return; }
   $('pwErr').textContent = ''; openModal('pwBox'); setTimeout(() => $('pwIn').focus(), 50);
 };
 window.submitPw = async () => {
