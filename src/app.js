@@ -1,14 +1,19 @@
 const OCL_URL = 'https://cdn.jsdelivr.net/npm/openchemlib@9.26.0/dist/openchemlib.js';
-const KINDS = ['단분자', '고분자', '이온성물질'];
+const KINDS = ['단분자', '고분자', '이온성물질', '혼합물'];
 const MOD_TYPES = ['없음', '말단개질', '그래프트', '반응생성물', '개질'];
 const DEFAULT_COS = ['한인', '엘에스켐', '제이와이트리켐', '케미웍스'];
 const EX_DOCS = ['연구개발용확인서', 'CAS미부여확인서', '물질식별정보', '단량체정보'];
 const SUB_DOCS = ['자진확인서', 'MSDS'];
 const DOC_LABEL = { 연구개발용확인서: '연구개발용 확인서', CAS미부여확인서: 'CAS 미부여 확인서', 물질식별정보: '물질 식별정보', 단량체정보: '단량체 정보', 자진확인서: '자진확인서', MSDS: 'MSDS' };
-const S = window.S = { data: {}, samples: [], tab: '전체', kind: '전체', view: 'list', q: '', sort: 'new', pw: null, hits: null, OCL: null, mols: {}, dmols: {}, qEditor: null, fEditor: null, mEditor: null, editing: null, today: '', setTab: '기타', ptTab: '고객사', dTab: 'info' };
+const S = window.S = { data: {}, samples: [], tab: '한인', kind: '전체', view: 'list', q: '', sort: 'new', pw: null, hits: null, OCL: null, mols: {}, dmols: {}, qEditor: null, fEditor: null, mEditor: null, editing: null, today: '', setTab: '기타', ptTab: '고객사', dTab: 'info' };
 
 // ---------- 공통 ----------
-const call = window.serverCall = (fn, ...args) => new Promise((ok, no) => google.script.run.withSuccessHandler(ok).withFailureHandler(no)[fn](...args));
+const call = window.serverCall = (fn, ...args) => new Promise((ok, no) => {
+  const r = google.script.run.withSuccessHandler(ok).withFailureHandler(no);
+  // 업데이트 직후 열린 창은 새 서버 기능을 모를 수 있음 → 새로고침 안내
+  if (typeof r[fn] !== 'function') { no(new Error('앱이 새 버전 기능을 아직 모릅니다. 창을 새로고침(Ctrl+F5)한 뒤 다시 해 주세요.')); return; }
+  r[fn](...args);
+});
 const $ = id => document.getElementById(id);
 const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const rows = t => S.data[t] || (S.data[t] = []);
@@ -223,7 +228,7 @@ function monoView(s, w, h) {
 }
 
 // ---------- 제출 형태 ----------
-const SOLV_SHORT = { EA: 'EA', MEK: 'MEK', ACT: 'Acetone', TOL: 'Toluene', HEX: 'Hexane', THF: 'THF', MC: 'MC', PGMEA: 'PGMEA', PGME: 'PGME' };
+const SOLV_SHORT = { EA: 'EA', MEK: 'MEK', ACT: 'Acetone', TOL: 'Toluene', HEX: 'Hexane', THF: 'THF', MC: 'MC', PGMEA: 'PGMEA', PGME: 'PGME', DMSO: 'DMSO' };
 const SOLV_ALIAS = { ACETONE: 'ACT', TOLUENE: 'TOL', HEXANE: 'HEX', 'N-HEXANE': 'HEX', 'ETHYL ACETATE': 'EA', DCM: 'MC', 'METHYLENE CHLORIDE': 'MC' };
 function parseForm(str) { try { const o = typeof str === 'string' ? JSON.parse(str || 'null') : str; if (o && o.t) return o; } catch (e) {} return null; }
 function legacyForm(s) {
@@ -274,7 +279,8 @@ function cardBadges(s) {
 }
 function renderFilters() {
   const tabs = ['전체', ...coNames(), ...(etcNames().length || S.samples.some(s => s['관리회사'] === '기타') ? ['기타'] : [])];
-  $('tabs').innerHTML = tabs.map(t => `<button class="tab ${S.tab === t ? 'on' : ''}" onclick="setTab('${esc(t)}')">${esc(t)}<span class="n">${S.samples.filter(s => inTab(s, t)).length}</span></button>`).join('');
+  if (!tabs.includes(S.tab)) S.tab = tabs.includes('한인') ? '한인' : '전체';
+  $('tabs').innerHTML = tabs.map(t => `<button class="tab ${S.tab === t ? 'on' : ''}" style="${t === '전체' || t === '기타' ? '' : '--c:' + coColor(t)}" onclick="setTab('${esc(t)}')">${esc(t)}<span class="n">${S.samples.filter(s => inTab(s, t)).length}</span></button>`).join('');
   const base = S.samples.filter(s => inTab(s, S.tab));
   $('kinds').innerHTML = ['전체', ...KINDS].map(k => `<button class="chip ${S.kind === k ? 'on' : ''}" onclick="setKind('${k}')">${k}<span class="n">${base.filter(s => inKind(s, k)).length}</span></button>`).join('');
 }
@@ -286,7 +292,7 @@ function render() {
   renderFilters();
   let L = S.samples.filter(s => inTab(s, S.tab) && inKind(s, S.kind));
   const q = S.q.trim().toLowerCase();
-  if (q) L = L.filter(s => ['관리번호', '제품명', '물질명', 'CAS', '용도', '고객사', '고객사담당자', '비고', '성상', '분자식', '단량체', '용매농도', '명의', '기타회사'].some(k => (s[k] || '').toLowerCase().includes(q)));
+  if (q) L = L.filter(s => ['관리번호', '제품명', '물질명', 'CAS', '용도', '고객사', '고객사담당자', '비고', '성상', '분자식', '단량체', '성분', '용매농도', '명의', '기타회사'].some(k => (s[k] || '').toLowerCase().includes(q)));
   if (S.hits) L = L.filter(s => S.hits.has(s.id));
   if (S.hits && S.hitMode === 'sim') L.sort((a, b) => S.hits.get(b.id).score - S.hits.get(a.id).score);
   else if (S.sort === 'name') L.sort((a, b) => a['제품명'].localeCompare(b['제품명'], 'ko'));
@@ -314,6 +320,7 @@ function drawCards() {
   });
 }
 function noStruct(s) {
+  if (s['성분']) { const L = parseComps(s['성분']); if (L.length) return '<div class="nostruct mixsum"><b>혼합물</b><br>' + L.map(c => esc(c.name || c.cas) + (c.rest ? '' : c.pct !== '' && c.pct != null ? ' ' + esc(c.pct) + '%' : '')).join(' · ') + (L.some(c => c.rest) ? ' in ' + esc((L.find(c => c.rest) || {}).name || '') : '') + '</div>'; }
   if (s['단량체']) return '<div class="nostruct">단량체<br>' + parseMono(s['단량체']).map(m => esc(m.abbr)).join(' · ') + '</div>';
   return '<span class="nostruct">구조 미등록</span>';
 }
@@ -342,6 +349,7 @@ function renderDetail() {
   $('dStruct').innerHTML = m ? svgOf(m, 520, 290, S.hits && S.hits.get(s.id) && S.hits.get(s.id).match) : (mv || noStruct(s));
   const poly = kindsOf(s).includes('고분자'), md = parseMod(s['개질']);
   const items = [['물질명', s['물질명']], ['CAS', s.CAS], ['종류', kindsOf(s).join(', ')]];
+  if (s['성분']) items.push(['성분', compSummary(parseComps(s['성분']))]);
   if (poly) items.push(['단량체', parseMono(s['단량체']).map(x => `${x.abbr}${x.name !== x.abbr ? ' (' + x.name + ')' : ''}${x.cas ? ' ' + x.cas : ''}`).join(' · ')]);
   else items.push(['분자식', s['분자식']], ['분자량', s['분자량']]);
   items.push(['성상', s['성상']], ['용도', s['용도']], ['고객사', s['고객사']], ['관리회사', companyOf(s)]);
@@ -429,7 +437,7 @@ function renderShipList(s) {
   const L = shipsOf(s.id);
   $('dShipSum').innerHTML = `<div class="sechead"><h4>출고 기록</h4><span class="sp"></span><button class="sm" onclick="openShip()">+ 출고 기록</button></div>` + (L.length ? L.map(x => `<div class="shsum" onclick="openShip('${x.id}')" title="눌러서 고치기">
       <span class="d">${esc(shipDate(x))}</span>${coBadge(x['명의'] || '?')}<span>→ <b>${esc(x['고객사'] || '고객사 미입력')}</b></span>
-      ${x['수량'] ? `<span class="q">${esc(x['수량'])}</span>` : ''}<span class="sp"></span>${x['서류제출일'] ? `<span class="b ok">서류 제출 ${esc(x['서류제출일'])}</span>` : ''}${!x['출고일'] && x['서류제출일'] ? '<span class="b etc">서류만</span>' : ''}</div>`).join('')
+      ${x['수량'] ? `<span class="q">${esc(x['수량'])}</span>` : ''}${x['가격'] ? `<span class="q">${esc(x['가격'])}</span>` : ''}<span class="sp"></span>${x['서류제출일'] ? `<span class="b ok">서류 제출 ${esc(x['서류제출일'])}</span>` : ''}${!x['출고일'] && x['서류제출일'] ? '<span class="b etc">서류만</span>' : ''}</div>`).join('')
     : '<div class="emptybox">아직 출고 기록이 없습니다. 샘플이 나가면 [+ 출고 기록]으로 날짜·고객사·수량을 남겨 두세요.</div>');
 }
 // ----- [제출 서류] 탭: 기록 없이 바로 서류 받기 -----
@@ -512,6 +520,7 @@ async function restorePw() {
 
 // ---------- 구조 검색 ----------
 window.toggleStruct = async () => {
+  setTimeout(() => $('structBtn') && $('structBtn').classList.toggle('on', $('structPanel').classList.contains('open')), 0);
   const p = $('structPanel'); p.classList.toggle('open');
   if (p.classList.contains('open') && !S.qEditor) { await loadOCL(); S.qEditor = new MolEditor($('qEditor'), { fragment: true }); }
 };
@@ -574,15 +583,19 @@ window.openForm = async id => {
   if (!S.fEditor) S.fEditor = new MolEditor($('fEditor'), { onChange: () => { updateCalc(); schedulePubChem(); } });
   const m = S.editing && molOf(S.editing);
   S.fEditor.clearAll(); if (m) { S.fEditor.setMolecule(m.getCompactCopy()); S.fEditor.undoStack = []; }
+  ctInit('f_comp', parseComps(s['성분']));
   $('f_종류').onchange = () => { renderPoly(); syncStructBox(); };
   renderPoly(); syncStructBox(); updateCalc();
   if (m) schedulePubChem(10);
 };
 function isPolyForm() { return segVals('f_종류').includes('고분자'); }
+const isMixForm = () => segVals('f_종류').includes('혼합물');
 function syncStructBox() {
-  const poly = isPolyForm(), hasMol = S.fEditor && !S.fEditor.isEmpty();
+  const poly = isPolyForm() || isMixForm(), hasMol = S.fEditor && !S.fEditor.isEmpty();
+  $('mixBox').style.display = isMixForm() ? '' : 'none';
   const hide = poly && !hasMol && !S.mainEdForced;
   $('mainEd').style.display = hide ? 'none' : ''; $('polyStructNote').style.display = hide ? '' : 'none';
+  $('polyStructNote').firstChild.textContent = isMixForm() ? '혼합물은 아래 성분 표로 넣습니다 · ' : '단량체 칸에 구조를 넣습니다 · ';
   if (!hide && S.fEditor) setTimeout(() => S.fEditor.redraw(), 0);
 }
 window.showMainEditor = () => { S.mainEdForced = true; syncStructBox(); setTimeout(() => { S.fEditor.fit(); S.fEditor.redraw(); }, 30); };
@@ -734,6 +747,7 @@ window.saveForm = async () => {
   if (S.editing && S.editing['관리회사'] !== obj['관리회사'] && !(S.editing['관리회사'] === '기타' && obj['관리회사'] === S.editing['기타회사'])) obj['관리번호'] = '';
   if (!obj['제품명']) { alert('제품명을 입력하세요.'); return; }
   if (!obj['관리회사']) { alert('관리회사를 고르세요.'); return; }
+  if (obj['종류'].includes('혼합물')) { obj['성분'] = JSON.stringify(ctRaw('f_comp')); if (!ctSum('f_comp')) { alert('혼합물 성분의 함량 합계가 100%가 아닙니다.'); return; } } else obj['성분'] = '';
   if (obj['종류'].includes('고분자')) { modChange(); obj['단량체'] = fmtMono(S.fMono); const md = S.fMod; obj['개질'] = (md.방식 && md.방식 !== '없음') || md.기반 ? JSON.stringify({ 방식: md.방식, 기반: md.기반, 물질: md.물질.filter(x => x.name || x.abbr).map(x => ({ abbr: x.abbr, name: x.name, cas: x.cas })) }) : ''; }
   const m = formMol(); let info = null;
   if (m) { info = chemInfo(m); Object.assign(obj, { idcode: info.idcode, 좌표: info.coords, 검색값: info.index, 분자식: info.formula, 분자량: obj['종류'].includes('고분자') ? '' : info.mw }); }
@@ -769,7 +783,7 @@ window.SF = { F: null, add(k) { addSolvTo(this.F, k); this.draw(); }, draw() { s
   sum(box = 's_형태칸') { const t = +((+this.F.p || 0) + this.F.s.reduce((a, c) => a + (+c.p || 0), 0)).toFixed(2), el = $(box + '_sum'); if (el) el.innerHTML = Math.abs(t - 100) < 0.01 ? '<span class="msg ok">합계 100% ✓</span>' : `<span class="msg bad">합계 ${t}%</span>`; } };
 window.shipCustChanged = () => {};
 function shipCo() { const v = segVal('s_명의'); return v === '기타' ? $('s_기타').value.trim() : v; }
-const SHIP_KEYS = ['고객사', '출고일', '수량', '서류제출일', '비고'];
+const SHIP_KEYS = ['고객사', '출고일', '수량', '가격', '서류제출일', '비고'];
 // 출고 기록 창(짧게): 출고사 · 고객사 · 출고일 · 수량 · 서류 제출일 · 비고. 다른 칸(요청일, 제출 형태 등)은 있던 값 그대로 둠
 window.openShip = id => {
   const s = S.cur; let x = id ? rows('출고').find(r => r.id === id) : null;
@@ -860,68 +874,170 @@ window.saveEx = async () => {
 };
 window.delEx = async () => { if (!confirm('이 신고면제 기록을 지울까요?')) return; await remove('신고면제', S.exRec.id); closeModal('exBox'); setTimeout(() => showDetail(S.cur.id, false, 'ex'), 380); };
 
+// ---------- 성분 표 (MSDS 작성 · 혼합물 샘플 공용) ----------
+// 행: {name, cas, pct, rest(나머지), key(용매), 면제번호, unknown(붙여넣기에서 못 읽음)}
+const CT = window.CT = {};
+function ctInit(id, list, onChange) { CT[id] = { list: (list || []).map(c => ({ ...c })), onChange }; if (!CT[id].list.length) CT[id].list.push({ name: '', cas: '', pct: '' }); ctDraw(id); }
+const ctRestVal = L => { if (!L.some(c => c.rest)) return null; return +(100 - L.reduce((a, c) => a + (c.rest ? 0 : (+c.pct || 0)), 0)).toFixed(4); };
+function ctResolved(id) {
+  const L = CT[id] ? CT[id].list : [], r = ctRestVal(L);
+  return L.filter(c => (c.name || '').trim() || (c.cas || '').trim()).map(c => { const o = { name: (c.name || '').trim(), cas: (c.cas || '').trim(), pct: c.rest ? r : (c.pct === '' || c.pct == null ? null : +c.pct), 면제번호: (c.면제번호 || '').trim() }; if (c.key) o.key = c.key; if (c.종류) o.종류 = c.종류; return o; });
+}
+const ctRaw = id => (CT[id] ? CT[id].list : []).filter(c => (c.name || '').trim() || (c.cas || '').trim()).map(c => { const o = { name: c.name || '', cas: c.cas || '', pct: c.rest ? '' : c.pct }; if (c.rest) o.rest = true; if (c.key) o.key = c.key; if (c.면제번호) o.면제번호 = c.면제번호; return o; });
+function ctStatus(id, i) {
+  const c = CT[id].list[i]; if (!c.name && !c.cas) return '';
+  if (c.unknown) return `<span class="b bad" title="사전에 없는 이름입니다. CAS를 넣거나 [사전에 추가]하세요.">못 읽음</span>`;
+  const s = Docs.compData(c); if (s) return `<span class="b ok" title="${esc(s.name + (s.src ? ' · ' + s.src : ''))}">자료 있음</span>`;
+  if (c.cas) return `<span class="b wait">자료 없음</span><button class="sm" onclick="dictOpen(null,'${id}',${i})">사전에 추가</button>`;
+  return '<span class="b etc">신규 물질</span>';
+}
+function ctDraw(id) {
+  const T = CT[id], el = $(id); if (!el) return;
+  const used = new Set(T.list.map(c => c.key).filter(Boolean));
+  el.innerHTML = `<table class="ctbl"><thead><tr><th>물질명</th><th style="width:112px">CAS</th><th style="width:78px">함량(%)</th><th style="width:132px">면제번호</th><th style="width:150px">자료</th><th style="width:34px"></th></tr></thead><tbody>` +
+    T.list.map((c, i) => `<tr class="${c.unknown ? 'bad' : ''}">
+      <td><input value="${esc(c.name)}" placeholder="이름 또는 약어 (예: DMSO)" oninput="ctSet('${id}',${i},'name',this.value)" onchange="ctMatch('${id}',${i})"></td>
+      <td><input value="${esc(c.cas)}" placeholder="없으면 비움" oninput="ctSet('${id}',${i},'cas',this.value)"></td>
+      <td><input value="${c.rest ? '나머지' : esc(c.pct)}" placeholder="% 또는 나머지" oninput="ctSet('${id}',${i},'pct',this.value)" style="text-align:right"></td>
+      <td><input value="${esc(c.면제번호 || '')}" placeholder="있으면" oninput="ctSet('${id}',${i},'면제번호',this.value)"></td>
+      <td id="${id}_st${i}" class="ctst">${ctStatus(id, i)}</td>
+      <td><button class="sm ghost" title="행 삭제" onclick="ctDel('${id}',${i})">×</button></td></tr>`).join('') + `</tbody></table>
+    <div class="row" style="margin-top:8px"><button class="sm" onclick="ctAdd('${id}')">+ 행 추가</button><button class="sm" onclick="pasteOpen('${id}')">붙여넣기</button>
+      <span class="hint" style="margin-left:8px">용매</span>${Docs.SOLV_ORDER.map(k => `<button class="sm" ${used.has(k) ? 'disabled' : ''} onclick="ctAddSolv('${id}','${k}')" title="${esc(Docs.SOLV[k].ko)}">+ ${SOLV_SHORT[k] || k}</button>`).join('')}</div>
+    <div class="sumbar" id="${id}_bar"></div><div class="sumtxt" id="${id}_sum"></div>`;
+  ctSum(id);
+}
+function ctSum(id) {
+  const L = CT[id].list, r = ctRestVal(L), cols = ['#14304d', '#2f80d8', '#1a7f37', '#c4520a', '#8250df', '#bf8700', '#d61f69', '#0aa3a3'];
+  const parts = L.filter(c => c.name || c.cas).map((c, i) => ({ n: c.name || c.cas, p: c.rest ? r : (+c.pct || 0), c: cols[i % cols.length] }));
+  const tot = +parts.reduce((a, x) => a + (+x.p || 0), 0).toFixed(4);
+  if ($(id + '_bar')) $(id + '_bar').innerHTML = parts.map(x => `<i style="width:${Math.max(0, Math.min(100, x.p))}%;background:${x.c}" title="${esc(x.n)} ${x.p}%"></i>`).join('');
+  const ok = r != null ? r >= 0 : Math.abs(tot - 100) < 0.01, el = $(id + '_sum');
+  if (el) el.innerHTML = !parts.length ? '' : r != null ? (r >= 0 ? `<span class="msg ok">나머지 = ${r}% · 합계 100% ✓</span>` : `<span class="msg bad">다른 성분 합이 100%를 넘습니다 (나머지 ${r}%)</span>`)
+    : ok ? '<span class="msg ok">합계 100% ✓</span>' : `<span class="msg bad">합계 ${tot}% — 100%가 되어야 합니다</span>`;
+  return ok;
+}
+window.ctSet = (id, i, k, v) => {
+  const c = CT[id].list[i];
+  if (k === 'pct') { const t = v.trim(); if (t === '나머지' || t === '나') { CT[id].list.forEach(x => { x.rest = false; }); c.rest = true; c.pct = ''; } else { c.rest = false; c.pct = t.replace('%', ''); } }
+  else { c[k] = v; if (k === 'name' || k === 'cas') { c.unknown = false; if (k === 'cas' || !Docs.SOLV[c.key] || Docs.SOLV[c.key].name !== v) { if (k === 'cas' && c.key && Docs.SOLV[c.key] && Docs.SOLV[c.key].cas !== v.trim()) delete c.key; } } }
+  const st = $(`${id}_st${i}`); if (st) st.innerHTML = ctStatus(id, i);
+  const tr = st && st.closest('tr'); if (tr) tr.classList.toggle('bad', !!c.unknown);
+  ctSum(id); if (CT[id].onChange) CT[id].onChange();
+};
+window.ctMatch = (id, i) => { // 이름으로 사전·용매 찾아 CAS 채우기(정확히 같은 이름만)
+  const c = CT[id].list[i]; if (!c.name || c.cas) return;
+  const s = Docs.findComp(c.name); if (!s) return;
+  c.cas = s.cas || ''; if (s.key) c.key = s.key; ctDraw(id); if (CT[id].onChange) CT[id].onChange();
+};
+window.ctAdd = id => { CT[id].list.push({ name: '', cas: '', pct: '' }); ctDraw(id); };
+window.ctDel = (id, i) => { CT[id].list.splice(i, 1); if (!CT[id].list.length) CT[id].list.push({ name: '', cas: '', pct: '' }); ctDraw(id); if (CT[id].onChange) CT[id].onChange(); };
+window.ctAddSolv = (id, k) => {
+  const L = CT[id].list, s = Docs.SOLV[k]; if (L.some(c => c.key === k)) return;
+  const row = { name: s.name, cas: s.cas, key: k, pct: '' }; if (!L.some(c => c.rest)) row.rest = true;
+  const empty = L.findIndex(c => !c.name && !c.cas); if (empty >= 0) L[empty] = row; else L.push(row);
+  ctDraw(id); if (CT[id].onChange) CT[id].onChange();
+};
+const compSummary = L => (L || []).filter(c => c.name || c.cas).map(c => `${c.name || c.cas}${c.rest ? '' : c.pct !== '' && c.pct != null ? ' ' + c.pct + '%' : ''}`).join(' · ') + ((L || []).some(c => c.rest) ? ' (나머지 ' + ((L.find(c => c.rest) || {}).name || '') + ')' : '');
+const parseComps = s => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
+
+// ---------- 조성 붙여넣기: "HI-SW-01 AgNO3 1.7%, LiCl 2.12%, PVA 10% in DMSO" ----------
+function parseCompLine(line) {
+  let t = line.trim().replace(/\s+/g, ' '); if (!t) return null;
+  let solv = ''; const m = t.match(/^(.*)\s+in\s+([^,%]+)$/i); if (m) { t = m[1]; solv = m[2].trim(); }
+  const segs = t.split(/[,;]/).map(x => x.trim()).filter(Boolean), comps = []; let product = '';
+  segs.forEach((sg, si) => {
+    const mm = sg.match(/^(.*?)\s*([\d.]+)\s*(?:wt\s*)?%$/i);
+    let name = mm ? mm[1].trim() : sg, pct = mm ? mm[2] : '';
+    if (si === 0) { // 맨 앞 칸에는 제품명이 붙어 있을 수 있음
+      const tk = name.split(' ');
+      if (!Docs.findComp(name) && tk.length > 1) { let k = tk.findIndex((_, j) => j > 0 && Docs.findComp(tk.slice(j).join(' '))); if (k < 0) k = 1; product = tk.slice(0, k).join(' ').replace(/[:：]$/, ''); name = tk.slice(k).join(' '); }
+    }
+    const s = Docs.findComp(name); comps.push({ name, cas: s ? s.cas : '', key: s && s.key, pct: pct, unknown: !s || !pct });
+  });
+  solv.split(/[\/+]/).map(x => x.trim()).filter(Boolean).forEach((n, j) => { const s = Docs.findComp(n); comps.push({ name: n, cas: s ? s.cas : '', key: s && s.key, pct: '', rest: j === 0, unknown: !s || j > 0 }); });
+  return { product, comps, line };
+}
+window.pasteOpen = id => { S.pasteFor = id; $('pasteTa').value = ''; $('pasteRes').innerHTML = ''; openModal('pasteBox'); setTimeout(() => $('pasteTa').focus(), 50); };
+window.pasteParse = () => {
+  const L = $('pasteTa').value.split(/\r?\n/).map(parseCompLine).filter(Boolean); S.pasteRes = L;
+  if (!L.length) { $('pasteRes').innerHTML = '<p class="empty">읽을 줄이 없습니다.</p>'; return; }
+  const multi = L.length > 1 && S.pasteFor === 'm_comp';
+  $('pasteRes').innerHTML = `<table class="tbl"><tr><th>원문</th><th>제품명</th><th>읽은 성분</th>${multi ? '<th></th>' : ''}</tr>` + L.map((p, i) => {
+    const bad = p.comps.filter(c => c.unknown).length;
+    return `<tr><td class="hint">${esc(p.line)}</td><td><b>${esc(p.product || '-')}</b></td><td>${p.comps.map(c => `<span class="b ${c.unknown ? 'bad' : 'ok'}" style="margin:1px">${esc(c.name)} ${c.rest ? '나머지' : esc(c.pct) + '%'}</span>`).join(' ')}${bad ? `<div class="wmini">못 읽은 성분 ${bad}개 — 표에서 고쳐야 합니다</div>` : ''}</td>${multi ? `<td><button class="sm" onclick="pasteUse(${i})">이 제품 열기</button></td>` : ''}</tr>`; }).join('') + '</table>' +
+    `<div class="row" style="margin-top:10px">${multi ? `<button class="primary" onclick="batchMsds()" ${L.some(p => p.comps.some(c => c.unknown)) || L.some(p => !p.product) ? 'disabled title="못 읽은 성분이나 제품명이 없는 줄이 있으면 하나씩 열어서 고치세요"' : ''}>${L.length}개 MSDS 한 번에 Excel로 받기</button>` : `<button class="primary" onclick="pasteUse(0)">표에 넣기</button>`}<span class="msg" id="pasteMsg"></span></div>`;
+};
+window.pasteUse = i => {
+  const p = S.pasteRes[i], id = S.pasteFor; closeModal('pasteBox');
+  ctInit(id, p.comps, CT[id] && CT[id].onChange);
+  if (id === 'm_comp' && p.product) $('m_제품명').value = p.product;
+  if (CT[id].onChange) CT[id].onChange();
+};
+window.batchMsds = async () => {
+  const base = msdsRead(), ci = companyInfoFor(base.양식);
+  for (let i = 0; i < S.pasteRes.length; i++) {
+    const p = S.pasteRes[i]; flash('pasteMsg', `만드는 중… ${i + 1}/${S.pasteRes.length} (${esc(p.product)})`);
+    ctInit('m_comp', p.comps); const M = msdsMeta({ ...base, 제품명: p.product, 성분: ctResolved('m_comp') });
+    try { const { blob } = await Docs.buildMsdsXlsx(M, ci); await Docs.deliver(blob, msdsFileName(M), 'xlsx', 'orig'); await msdsLog(M); }
+    catch (e) { flash('pasteMsg', `${esc(p.product)}: ${errMsg(e)}`, false); return; }
+  }
+  flash('pasteMsg', `✓ ${S.pasteRes.length}개를 받았습니다. 노란 칸을 확인하세요.`); ctInit('m_comp', [], msdsPreview); msdsPreview(); renderMsdsHist();
+};
+
 // ---------- MSDS ----------
-const SOLV_COL = ['#2f80d8', '#1a7f37', '#c4520a', '#8250df', '#bf8700', '#d61f69', '#57606a', '#0aa3a3', '#953800'];
-function blankMsds() { return { 제품명: '', 양식: '한인', 용질: { 물질명: '', cas: '', pct: 100, mw: '', 면제번호: '' }, 용질종류: '신규 물질', 용매: [], 성상: '', 색상: '', 용도: '' }; }
+function blankMsds() { return { 제품명: '', 양식: '한인', 성분: [], 성상: '', 색상: '', 용도: '연구개발용', 분자량: '' }; }
 S.msds = blankMsds();
 function msdsFromSample(s, ship) {
   const inst = ship && ship['고객사'], ex = sampleEx(s.id, inst || undefined), mol = molOf(s);
-  const f = ship ? parseForm(ship['제출형태']) : legacyForm(s), solv = f && f.t === 'sol' ? f.s.map(x => ({ key: x.k, pct: x.p })) : [];
   const co = ship ? coOf(ship['명의']) : null;
   const form = (co && co['MSDS양식']) || (ship && ship['명의'] === '엘에스켐' ? '엘에스켐' : '한인');
-  S.msdsCtx = ship ? { sid: s.id, shipId: ship.id } : { sid: s.id };
-  S.msds = { 제품명: s['제품명'], 양식: form,
-    용질: { 물질명: (ex && ex.e['통지물질명']) || s['물질명'] || '', cas: s.CAS || '', pct: f && f.t === 'sol' ? f.p : 100, mw: kindsOf(s).includes('고분자') ? '' : (s['분자량'] || (mol ? chemInfo(mol).mw : '')), 면제번호: ex && ex.st.k === '유효' ? ex.e['면제번호'] : '' },
-    용질종류: kindsOf(s).includes('고분자') ? '고분자' : '신규 물질', 용매: solv, 성상: s['성상'] || '', 색상: '', 용도: s['용도'] || '' };
+  const exNo = ex && ex.st.k === '유효' ? ex.e['면제번호'] : '';
+  let comps;
+  if (kindsOf(s).includes('혼합물') && s['성분']) comps = parseComps(s['성분']);
+  else {
+    const f = ship ? parseForm(ship['제출형태']) : legacyForm(s);
+    comps = [{ name: (ex && ex.e['통지물질명']) || s['물질명'] || s['제품명'], cas: s.CAS || '', pct: f && f.t === 'sol' ? String(f.p) : '100', 면제번호: exNo, 종류: kindsOf(s).includes('고분자') ? '고분자' : '신규 물질' }];
+    if (f && f.t === 'sol') f.s.forEach(x => { const v = Docs.SOLV[x.k]; if (v) comps.push({ name: v.name, cas: v.cas, key: x.k, pct: String(x.p) }); });
+  }
+  S.msdsCtx = { sid: s.id };
+  S.msds = { 제품명: s['제품명'], 양식: form, 성분: comps, 성상: s['성상'] || '', 색상: '', 용도: '연구개발용', 분자량: kindsOf(s).includes('고분자') || kindsOf(s).includes('혼합물') ? '' : (s['분자량'] || (mol ? chemInfo(mol).mw : '')) };
 }
 function msdsRefresh() {
-  const M = S.msds; $('m_samples').innerHTML = S.samples.map(s => `<option value="${esc(s['제품명'])}">${esc(s['관리번호'] || '')}</option>`).join('');
+  const M = S.msds; Docs.setDict(rows('성분사전'));
+  $('m_samples').innerHTML = S.samples.map(s => `<option value="${esc(s['제품명'])}">${esc(s['관리번호'] || '')}</option>`).join('');
   $('m_제품명').value = M.제품명 || ''; seg('m_양식', [...new Set(['한인', '엘에스켐', M.양식 || '한인'])], [M.양식 || '한인'], 'radio', true);
-  const u = M.용질; $('m_물질명').value = u.물질명 || ''; $('m_cas').value = u.cas || ''; $('m_pct').value = u.pct ?? ''; $('m_면제번호').value = u.면제번호 || ''; $('m_mw').value = u.mw || '';
-  $('m_용질종류').value = M.용질종류 || '신규 물질'; ['성상', '색상', '용도'].forEach(k => $('m_' + k).value = M[k] || '');
-  $('m_msg').textContent = ''; renderSolv(); msdsPreview();
-  const c = S.msdsCtx, s = c && S.samples.find(x => x.id === c.sid), sh = c && c.shipId && rows('출고').find(x => x.id === c.shipId);
-  $('m_from').textContent = s ? `${s['관리번호'] || ''} ${s['제품명']}${sh ? ` · ${sh['요청일'] || ''} ${sh['고객사'] || ''} 출고 건 (${sh['명의']})` : ''}` : '';
+  ['성상', '색상', '용도', '분자량'].forEach(k => $('m_' + k).value = M[k] || '');
+  ctInit('m_comp', M.성분, msdsPreview);
+  $('m_msg').textContent = ''; msdsPreview(); renderMsdsHist();
+  const c = S.msdsCtx, s = c && S.samples.find(x => x.id === c.sid);
+  $('m_from').innerHTML = s ? `<button class="linkbtn" onclick="msdsBackToSample()" title="샘플로 돌아가기">← ${esc(s['관리번호'] || '')} ${esc(s['제품명'])}</button>` : '';
 }
+window.msdsBackToSample = () => { const c = S.msdsCtx; if (!c) return; navTo('list'); setTimeout(() => showDetail(c.sid, false, S.msdsFromTab || 'ship'), 50); };
 const companyInfoFor = form => { const c = coOf(form) || {}; return { 회사명: c['회사명'] || '', 주소: c['주소'] || '', 전화: c['전화'] || '' }; };
 window.msdsPick = () => { const s = S.samples.find(x => x['제품명'] === $('m_제품명').value); if (s) { msdsFromSample(s, shipsOf(s.id)[0]); msdsRefresh(); } };
-function renderSolv() {
-  const used = new Set(S.msds.용매.map(c => c.key));
-  $('m_solvbtns').innerHTML = Docs.SOLV_ORDER.map(k => `<button ${used.has(k) ? 'disabled' : ''} onclick="addSolv('${k}')" title="${esc(Docs.SOLV[k].ko)}">+ ${k === 'ACT' ? '아세톤' : k === 'TOL' ? '톨루엔' : k === 'HEX' ? '헥산' : k}</button>`).join('');
-  $('m_solv').innerHTML = S.msds.용매.map((c, i) => { const v = Docs.SOLV[c.key]; return `<div class="srow"><div><b>${esc(v.name)}</b> <span class="hint">${esc(v.ko)}</span><small>CAS ${v.cas} · 인화점 ${v.fp == null ? '없음' : v.fp + ' °C'}</small></div>
-    <div class="pct"><input type="number" step="any" value="${c.pct}" oninput="S.msds.용매[${i}].pct=+this.value;msdsPreview()"> %</div>
-    <button class="sm" onclick="S.msds.용매.splice(${i},1);renderSolv();msdsPreview()">삭제</button></div>`; }).join('') || '<p class="empty">용매 없음 (원액, 유해성 자료없음)</p>';
+// 형태 꼬리표(파일 이름·개정 구분): 액체 용매가 있으면 "(용질 % 용매+용매)"
+function formTag(comps) {
+  const liq = comps.filter(c => { const s = Docs.compData(c); return s && s.liquid; }); if (!liq.length || liq.length === comps.length) return '';
+  const p = +(100 - liq.reduce((a, c) => a + (+c.pct || 0), 0)).toFixed(2);
+  return `(${p}% ${liq.map(c => SOLV_SHORT[c.key] || (Docs.compData(c) || {}).syn || c.name).join('+')})`;
 }
-window.renderSolv = renderSolv;
-window.addSolv = key => {
-  msdsRead(); const M = S.msds, u = M.용질;
-  if (M.용매.some(c => c.key === key)) return;
-  const sum = (+u.pct || 0) + M.용매.reduce((a, c) => a + (+c.pct || 0), 0);
-  let give = +(100 - sum).toFixed(2);
-  if (give <= 0) { // 가장 많은 성분에서 반을 나눠 줌
-    const big = M.용매.length ? M.용매.reduce((a, c) => (+c.pct > +a.pct ? c : a)) : null;
-    if (big && +big.pct >= (+u.pct || 0)) { give = +(big.pct / 2).toFixed(2); big.pct = +(big.pct - give).toFixed(2); }
-    else { give = +((+u.pct || 0) / 2).toFixed(2); u.pct = +((+u.pct || 0) - give).toFixed(2); $('m_pct').value = u.pct; }
-  }
-  M.용매.push({ key, pct: give }); renderSolv(); msdsPreview();
-};
+function msdsMeta(M) {
+  M.형태 = formTag(M.성분 || []);
+  const hist = rows('MSDS이력').filter(h => { let t = ''; try { t = JSON.parse(h['입력'] || '{}').형태 || ''; } catch (e) {} return h['제품명'] === M.제품명 && h['양식'] === M.양식 && t === M.형태; }).sort((a, b) => (a['작성일'] || '').localeCompare(b['작성일'] || ''));
+  M.개정차수 = hist.length; M.최초작성일 = hist.length ? hist[0]['작성일'] : S.today; M.작성일 = S.today; return M;
+}
 function msdsRead() {
   const M = S.msds; M.제품명 = $('m_제품명').value.trim(); M.양식 = segVal('m_양식') || '한인';
-  M.용질 = { 물질명: $('m_물질명').value.trim(), cas: $('m_cas').value.trim(), pct: $('m_pct').value, 면제번호: $('m_면제번호').value.trim(), mw: $('m_mw').value.trim() };
-  M.용질종류 = $('m_용질종류').value; ['성상', '색상', '용도'].forEach(k => M[k] = $('m_' + k).value.trim());
-  M.형태 = M.용매.length ? `(${M.용질.pct}% ${M.용매.map(x => SOLV_SHORT[x.key] || x.key).join('+')})` : '';
-  const hist = rows('MSDS이력').filter(h => { let t = ''; try { t = JSON.parse(h['입력'] || '{}').형태 || ''; } catch (e) {} return h['제품명'] === M.제품명 && h['양식'] === M.양식 && t === M.형태; }).sort((a, b) => (a['작성일'] || '').localeCompare(b['작성일'] || ''));
-  M.개정차수 = hist.length; M.최초작성일 = hist.length ? hist[0]['작성일'] : S.today; M.작성일 = S.today;
-  return M;
+  ['성상', '색상', '용도', '분자량'].forEach(k => M[k] = $('m_' + k).value.trim());
+  M.성분 = ctResolved('m_comp'); return msdsMeta(M);
 }
 let ghsImgs = null;
 async function msdsPreview() {
   const M = msdsRead(), ci = companyInfoFor(M.양식), C = Docs.msdsContent(M, ci);
-  const parts = [{ n: '용질', p: +M.용질.pct || 0, c: '#14304d' }, ...M.용매.map((s, i) => ({ n: s.key, p: +s.pct || 0, c: SOLV_COL[Docs.SOLV_ORDER.indexOf(s.key)] }))], sum = +parts.reduce((a, x) => a + x.p, 0).toFixed(2);
-  $('m_bar').innerHTML = parts.map(x => `<i style="width:${Math.max(0, Math.min(100, x.p))}%;background:${x.c}" title="${x.n} ${x.p}%"></i>`).join('');
-  $('m_sum').innerHTML = Math.abs(sum - 100) < 0.01 ? `<span class="msg ok">합계 100% ✓</span>` : `<span class="msg bad">합계 ${sum}% — 100%가 되어야 합니다</span>`;
   const w = [...C.flags]; if (!ci.회사명) w.push(`거래처 → 출고사에 ${M.양식} 회사 정보가 없습니다.`);
-  if (M.용매.length) w.push('용매 자료(노출기준, 15번 규제)는 공급사 MSDS로 한 번 검수하세요.');
+  if (M.성분.some(c => c.key)) w.push('용매 자료(노출기준, 15번 규제)는 공급사 MSDS로 한 번 검수하세요.');
+  if ((CT.m_comp ? CT.m_comp.list : []).some(c => c.unknown)) w.unshift('빨간 줄(못 읽은 성분)을 고쳐야 만들 수 있습니다.');
   if (!ghsImgs) { try { const T = await Docs.templates(); ghsImgs = T.ghs; } catch (e) { ghsImgs = {}; } }
   const pics = C.C.pic.length ? `<div class="pics">${C.C.pic.map(g => ghsImgs[g] ? `<img src="data:image/png;base64,${ghsImgs[g]}" title="${g}">` : `<span class="b etc">${g}</span>`).join('')}</div>` : '없음';
   $('m_prev').innerHTML = `<div class="kv"><div>신호어</div><div>${C.s2.신호어 === '위험' ? '<span class="b bad big">위험</span>' : C.s2.신호어 === '경고' ? '<span class="b wait big">경고</span>' : '해당없음'}</div>
@@ -934,26 +1050,128 @@ async function msdsPreview() {
     (w.length ? `<div class="wl" style="margin-top:12px">${w.map(x => `<div>${esc(x)}</div>`).join('')}</div>` : '');
 }
 window.msdsPreview = msdsPreview;
+const msdsFileName = M => { const s = S.samples.find(x => x['제품명'] === M.제품명); return `${s ? baseName(s) : Docs.safeName(M.제품명)}_MSDS${M.양식 !== '한인' ? '(' + Docs.safeName(M.양식) + ')' : ''}${Docs.safeName(M.형태)}${M.개정차수 ? '_개정' + M.개정차수 : ''}`; };
+async function msdsLog(M) {
+  if (!S.pw || !$('m_hist').checked) return;
+  await save('MSDS이력', { 제품명: M.제품명, 양식: M.양식, 입력: JSON.stringify({ 형태: M.형태, 성분: M.성분, 성상: M.성상, 색상: M.색상, 용도: M.용도, 분자량: M.분자량 }), 작성일: S.today, 개정차수: String(M.개정차수) });
+}
 window.makeMsds = async fmtK => {
   const M = msdsRead(); if (!M.제품명) { flash('m_msg', '제품명을 입력하세요.', false); return; }
+  if (!M.성분.length) { flash('m_msg', '성분을 한 줄 이상 넣으세요.', false); return; }
+  if (CT.m_comp.list.some(c => c.unknown)) { flash('m_msg', '빨간 줄(못 읽은 성분)을 먼저 고치세요.', false); return; }
+  if (!ctSum('m_comp')) { flash('m_msg', '함량 합계가 100%가 아닙니다.', false); return; }
   const ci = companyInfoFor(M.양식); flash('m_msg', fmtK === 'orig' ? '만드는 중…' : 'PDF로 바꾸는 중… (몇 초 걸려요)');
   try {
     const { blob } = await Docs.buildMsdsXlsx(M, ci);
-    const s = S.samples.find(x => x['제품명'] === M.제품명);
-    const name = `${s ? baseName(s) : Docs.safeName(M.제품명)}_MSDS${M.양식 !== '한인' ? '(' + Docs.safeName(M.양식) + ')' : ''}${Docs.safeName(M.형태)}${M.개정차수 ? '_개정' + M.개정차수 : ''}`;
-    await Docs.deliver(blob, name, 'xlsx', fmtK);
-    if (S.pw && $('m_hist').checked) await save('MSDS이력', { 제품명: M.제품명, 양식: M.양식, 입력: JSON.stringify({ 형태: M.형태, 용질: M.용질, 용매: M.용매, 성상: M.성상, 색상: M.색상, 용도: M.용도 }), 작성일: S.today, 개정차수: String(M.개정차수) });
-    flash('m_msg', '✓ 내려받았습니다. 노란 칸을 확인한 뒤 PC에 저장하세요.'); msdsPreview();
+    await Docs.deliver(blob, msdsFileName(M), 'xlsx', fmtK); await msdsLog(M);
+    flash('m_msg', '✓ 내려받았습니다. 노란 칸을 확인한 뒤 PC에 저장하세요.'); msdsPreview(); renderMsdsHist();
   } catch (e) { flash('m_msg', '만들지 못했습니다: ' + errMsg(e), false); }
 };
 window.cancelMsds = () => {
-  const M = msdsRead(), touched = M.제품명 || M.용질.물질명 || M.용매.length || M.성상 || M.색상;
-  if (touched && !confirm('작성 중인 내용이 지워집니다. 취소할까요?')) return;
-  S.msds = blankMsds(); S.msdsCtx = null; goBack();
+  const M = msdsRead(), touched = M.제품명 || M.성분.length || M.성상 || M.색상;
+  if (touched && !confirm('작성 중인 내용을 지우고 새로 시작할까요?')) return;
+  S.msds = blankMsds(); S.msdsCtx = null; msdsRefresh();
+};
+// MSDS로 만든 제품을 샘플로 저장(관리번호 생성). 성분이 여러 개면 혼합물
+window.msdsToSample = async () => {
+  const M = msdsRead(); if (!M.제품명) { flash('m_msg', '제품명을 입력하세요.', false); return; }
+  if (!S.pw) { flash('m_msg', '편집 모드에서 저장할 수 있습니다.', false); return; }
+  const ex = S.samples.find(x => x['제품명'] === M.제품명), raw = ctRaw('m_comp'), mix = raw.length > 1;
+  const co = coNames().includes(M.양식) ? M.양식 : '한인';
+  if (ex && !confirm(`"${M.제품명}"은 이미 ${ex['관리번호'] || ''} 샘플로 있습니다. 성분을 이 내용으로 바꿀까요?`)) return;
+  if (!ex && !confirm(`"${M.제품명}"을 ${co} 샘플로 등록할까요? (관리번호는 자동)`)) return;
+  const o = Object.assign({}, ex || { 관리회사: co, 명의: co }, { 제품명: M.제품명, 성상: M.성상 || (ex && ex['성상']) || '' });
+  if (mix) { o['종류'] = [...new Set([...kindsOf(o).filter(k => k !== '단분자'), '혼합물'])].join(','); o['성분'] = JSON.stringify(raw); }
+  else if (!ex) { o['종류'] = '단분자'; o['물질명'] = raw[0] ? raw[0].name : ''; o['CAS'] = raw[0] ? raw[0].cas : ''; }
+  try { const r = await save('샘플', o); S.samples = rows('샘플'); S.msdsCtx = { sid: r.id }; msdsRefresh(); render(); flash('m_msg', `✓ ${esc(r['관리번호'] || '')} ${esc(r['제품명'])} 샘플로 저장했습니다.`); }
+  catch (e) { flash('m_msg', '저장하지 못했습니다: ' + errMsg(e), false); }
+};
+// 작성 이력: 찾아보고 다시 만들기
+function renderMsdsHist() {
+  const q = ($('m_hq') && $('m_hq').value || '').trim().toLowerCase();
+  const L = rows('MSDS이력').map(h => { let o = {}; try { o = JSON.parse(h['입력'] || '{}'); } catch (e) {} const comps = Docs.toComps(o); return { h, o, comps, sum: comps.map(c => `${c.name}${c.pct != null && c.pct !== '' ? ' ' + c.pct + '%' : ''}`).join(' · ') }; })
+    .filter(x => !q || [x.h['제품명'], x.h['양식'], x.sum, ...x.comps.map(c => c.cas)].some(v => String(v || '').toLowerCase().includes(q)))
+    .sort((a, b) => String(b.h['작성일'] || '').localeCompare(String(a.h['작성일'] || '')) || String(b.h['수정일'] || '').localeCompare(String(a.h['수정일'] || '')));
+  if (!$('m_hlist')) return;
+  $('m_hlist').innerHTML = L.length ? `<table class="tbl"><tr><th style="width:96px">작성일</th><th style="width:130px">제품명</th><th style="width:70px">양식</th><th>성분</th><th style="width:60px">개정</th><th style="width:70px"></th></tr>` +
+    L.slice(0, 100).map(x => `<tr><td>${esc(x.h['작성일'])}</td><td style="white-space:nowrap"><b>${esc(x.h['제품명'])}</b></td><td>${esc(x.h['양식'])}</td><td class="hint">${esc(x.sum)}</td><td>${+x.h['개정차수'] ? x.h['개정차수'] + '차' : '최초'}</td>
+      <td><button class="sm" onclick="msdsLoadHist('${x.h.id}')">불러오기</button></td></tr>`).join('') + '</table>' + (L.length > 100 ? `<p class="hint">${L.length}건 중 100건만 보입니다. 검색으로 좁혀 주세요.</p>` : '')
+    : `<div class="emptybox">${q ? '찾는 이력이 없습니다.' : 'MSDS를 만들면(이력 남기기 켜짐) 여기에 쌓입니다.'}</div>`;
+}
+window.renderMsdsHist = renderMsdsHist;
+window.msdsLoadHist = id => {
+  const h = rows('MSDS이력').find(x => x.id === id); if (!h) return; let o = {}; try { o = JSON.parse(h['입력'] || '{}'); } catch (e) {}
+  S.msds = { 제품명: h['제품명'], 양식: h['양식'] || '한인', 성분: Docs.toComps(o).map(c => ({ ...c, pct: c.pct == null ? '' : String(c.pct) })), 성상: o.성상 || '', 색상: o.색상 || '', 용도: o.용도 || '연구개발용', 분자량: o.분자량 || (o.용질 && o.용질.mw) || '' };
+  const s = S.samples.find(x => x['제품명'] === h['제품명']); S.msdsCtx = s ? { sid: s.id } : null;
+  msdsRefresh(); window.scrollTo(0, 0); flash('m_msg', `${esc(h['작성일'])} 이력을 불러왔습니다. 고쳐서 다시 받으면 개정판이 됩니다.`);
 };
 
+// ---------- 성분 사전 (설정) ----------
+const DICT_F = [['이름', '이름(영문) *', 'c2'], ['국문명', '국문명', 'c2'], ['이명', '약어·이명 (쉼표로)', 'c2'], ['CAS', 'CAS *', 'c2']];
+window.dictOpen = (id, ctId, rowI) => {
+  Docs.setDict(rows('성분사전'));
+  let r = id ? rows('성분사전').find(x => x.id === id) : null, d = {};
+  if (r) { try { d = JSON.parse(r['자료'] || '{}'); } catch (e) {} }
+  else if (ctId != null) { const c = CT[ctId].list[rowI]; r = { 이름: c.name, CAS: c.cas }; }
+  else if (S.dictCopy) { const b = Docs.BASE_COMPS.find(x => x.cas === S.dictCopy); r = { 이름: b.name, 국문명: b.ko, 이명: b.syn, CAS: b.cas, 출처: b.src }; d = JSON.parse(JSON.stringify(b)); S.dictCopy = null; }
+  r = r || {}; S.dictCtx = { id: r.id || null, ctId, rowI }; const k = d.cls || {}, L = d.law || {};
+  const sel = (nm, opts, v) => `<select id="dc_${nm}">${opts.map(([val, lab]) => `<option value="${val}" ${String(v ?? '') === String(val) ? 'selected' : ''}>${lab}</option>`).join('')}</select>`;
+  const inp = (nm, v, ph) => `<input id="dc_${nm}" value="${esc(v ?? '')}" placeholder="${esc(ph || '')}">`;
+  $('dictTitle').textContent = r.id ? `성분 사전 — ${r['이름']}` : '성분 사전에 추가';
+  $('dictBody').innerHTML = `<div class="f">${DICT_F.map(([f, lab, cl]) => `<div class="${cl}"><label>${lab}</label>${inp(f, r[f])}</div>`).join('')}
+      <div class="c2"><label>상태</label>${sel('liquid', [['', '고체'], ['1', '액체(용매)']], d.liquid ? '1' : '')}</div>
+      <div class="c4"><label>출처 (SDS·분류 근거)</label>${inp('출처', r['출처'], '예: Sigma-Aldrich SDS 2025, EU CLP 조화분류')}</div></div>
+    <h3 style="margin:16px 0 8px">유해성 분류</h3>
+    <div class="f">
+      <div class="c2"><label>급성독성 경구 ATE (mg/kg)</label>${inp('ate', k.ate, '구분4만 알면 500')}</div>
+      <div class="c2"><label>급성독성 경피 ATE (mg/kg)</label>${inp('ateDerm', k.ateDerm, '구분4만 알면 1100')}</div>
+      <div class="c2"><label>LD50 (MSDS 11번 문구)</label>${inp('ld50', d.ld50, '예: 526 mg/kg (쥐)')}</div>
+      <div class="c2"><label>피부 부식성/자극성</label>${sel('skin', [['', '해당없음'], ['1', '구분1 (H314)'], ['2', '구분2 (H315)']], k.skin)}</div>
+      <div class="c2"><label>눈 손상성/자극성</label>${sel('eye', [['', '해당없음'], ['1', '구분1 (H318)'], ['2', '구분2 (H319)']], k.eye)}</div>
+      <div class="c2"><label>피부 과민성</label>${sel('sens', [['', '해당없음'], ['1', '구분1 (H317)']], k.sens ? '1' : '')}</div>
+      <div class="c2"><label>수생 급성 구분1 M 인자</label>${inp('acute', k.acute, '해당 없으면 비움 (보통 1)')}</div>
+      <div class="c2"><label>수생 만성</label>${sel('chronic', [['', '해당없음'], ['1', '구분1 (H410)'], ['2', '구분2 (H411)'], ['3', '구분3 (H412)']], k.chronic)}</div>
+      <div class="c2"><label>만성 구분1 M 인자</label>${inp('chronicM', k.chronicM, '보통 1')}</div>
+      <div class="c2"><label>발암성 구분2</label>${sel('carc', [['', '해당없음'], ['1', '해당 (H351)']], k.carc ? '1' : '')}</div>
+      <div class="c2"><label>산화성</label>${sel('ox', [['', '해당없음'], ['1', '산화성 있음(확인 표시)']], k.ox ? '1' : '')}</div>
+      <div class="c2"><label>노출기준 (8번)</label>${inp('twa', d.twa, '예: TWA 1 mg/m³')}</div>
+      <div class="c2"><label>인화점 °C (액체)</label>${inp('fp', d.fp)}</div><div class="c2"><label>끓는점 °C</label>${inp('bp', d.bp)}</div><div class="c2"><label>녹는점 °C</label>${inp('mp', d.mp)}</div>
+      <div class="c2"><label>UN 번호 (단독일 때)</label>${inp('un', d.un)}</div><div class="c2"><label>운송 등급</label>${inp('unClass', d.unClass)}</div><div class="c2"><label>용기등급</label>${inp('pg', d.pg)}</div>
+      <div class="c2"><label>산안법 (15번)</label>${inp('l산안법', L.산안법, '예: 해당없음')}</div><div class="c2"><label>화관법 (15번)</label>${inp('l화관법', L.화관법, '예: 해당없음')}</div><div class="c2"><label>화평법 (15번)</label>${inp('l화평법', L.화평법 || '기존화학물질')}</div>
+      <div class="c6"><label>기타 주의(2번 기타·확인 표시)</label>${inp('note', d.note)}</div></div>`;
+  $('dictMsg').textContent = ''; $('dictDel').style.visibility = r.id ? '' : 'hidden'; openModal('dictBox');
+};
+window.dictSave = async () => {
+  const g = n => ($('dc_' + n).value || '').trim(), num = n => g(n) === '' ? undefined : +g(n);
+  const r = Object.assign({}, rows('성분사전').find(x => x.id === S.dictCtx.id) || {}, { 이름: g('이름'), 국문명: g('국문명'), 이명: g('이명'), CAS: g('CAS'), 출처: g('출처') });
+  if (!r['이름'] || !r['CAS']) { flash('dictMsg', '이름과 CAS는 꼭 넣어 주세요.', false); return; }
+  const cls = { ate: num('ate'), ateDerm: num('ateDerm'), skin: num('skin'), eye: num('eye'), sens: g('sens') === '1' || undefined, acute: num('acute'), chronic: num('chronic'), chronicM: num('chronicM'), carc: g('carc') === '1' || undefined, ox: g('ox') === '1' || undefined };
+  Object.keys(cls).forEach(k => cls[k] === undefined && delete cls[k]);
+  const d = { liquid: g('liquid') === '1', cls, ld50: g('ld50'), twa: g('twa'), fp: num('fp'), bp: num('bp'), mp: num('mp'), un: g('un'), unClass: g('unClass'), pg: g('pg'), note: g('note'), law: { 산안법: g('l산안법'), 화관법: g('l화관법'), 화평법: g('l화평법') } };
+  Object.keys(d).forEach(k => (d[k] === undefined || d[k] === '') && delete d[k]);
+  r['자료'] = JSON.stringify(d);
+  try { await save('성분사전', r); Docs.setDict(rows('성분사전')); closeModal('dictBox');
+    const c = S.dictCtx; if (c.ctId && CT[c.ctId]) { ctDraw(c.ctId); if (CT[c.ctId].onChange) CT[c.ctId].onChange(); }
+    if (S.view === 'settings') renderSettings(); }
+  catch (e) { flash('dictMsg', '저장하지 못했습니다: ' + errMsg(e), false); }
+};
+window.dictDel = async () => { if (!confirm('이 성분을 사전에서 지울까요?')) return; await remove('성분사전', S.dictCtx.id); Docs.setDict(rows('성분사전')); closeModal('dictBox'); renderSettings(); };
+window.dictCopyBase = cas => { S.dictCopy = cas; dictOpen(); };
+function renderDict() {
+  Docs.setDict(rows('성분사전'));
+  const mine = rows('성분사전'), mineCas = new Set(mine.map(r => r['CAS']));
+  const tag = d => { const k = d.cls || {}, t = []; if (k.ate) t.push('급성(경구) ATE ' + k.ate); if (k.skin) t.push('피부 ' + k.skin); if (k.eye) t.push('눈 ' + k.eye); if (k.sens) t.push('과민'); if (k.acute) t.push('수생급성1 M' + k.acute); if (k.chronic) t.push('만성' + k.chronic + (k.chronicM > 1 ? ' M' + k.chronicM : '')); if (k.ox) t.push('산화성'); if (k.carc) t.push('발암2'); return t.join(' · ') || '분류 해당없음'; };
+  $('setBody').innerHTML = `<div class="box"><h3>성분 사전<span class="sp"></span><button class="primary sm" onclick="dictOpen()">+ 성분 추가</button></h3>
+    <p class="hint" style="margin:0 0 10px">MSDS 성분 표에 CAS를 넣으면 여기 자료로 유해성을 계산합니다. 같은 CAS가 여기와 기본값에 다 있으면 여기 것을 씁니다.</p>
+    <table class="tbl"><tr><th>이름</th><th>CAS</th><th>분류</th><th>출처</th><th></th></tr>` +
+    mine.map(r => { let d = {}; try { d = JSON.parse(r['자료'] || '{}'); } catch (e) {} return `<tr><td><b>${esc(r['이름'])}</b> <span class="hint">${esc(r['이명'] || '')}</span></td><td>${esc(r['CAS'])}</td><td class="hint">${esc(tag(d))}</td><td class="hint">${esc(r['출처'] || '')}</td><td><button class="sm" onclick="dictOpen('${r.id}')">수정</button></td></tr>`; }).join('') +
+    `</table>${mine.length ? '' : '<p class="empty">아직 직접 넣은 성분이 없습니다.</p>'}</div>
+    <div class="box"><h3>기본값 (앱에 들어 있음)</h3><table class="tbl"><tr><th>이름</th><th>CAS</th><th>분류</th><th>출처</th><th></th></tr>` +
+    [...Docs.BASE_COMPS, ...Docs.SOLV_ORDER.map(k => Docs.SOLV[k])].map(b => `<tr><td><b>${esc(b.name)}</b> <span class="hint">${esc(b.syn || '')}</span></td><td>${esc(b.cas)}</td><td class="hint">${esc(tag(b))}</td><td class="hint">${esc(b.src || (b.key ? '용매 (공급사 MSDS·EU CLP)' : ''))}</td><td>${mineCas.has(b.cas) ? '<span class="hint">사전 것을 씀</span>' : b.key ? '' : `<button class="sm" onclick="dictCopyBase('${b.cas}')">복사해 고치기</button>`}</td></tr>`).join('') + '</table></div>';
+}
+
 // ---------- 설정 ----------
-const SET_TABS = ['기타', '단량체 사전', '여러 개 등록', '업데이트'];
+const SET_TABS = ['기타', '성분 사전', '단량체 사전', '여러 개 등록', '업데이트'];
 const ETC_FIELDS = [['자진확인서수량', '자진확인서 취급최대수량(톤)', 'c2'], ['처리업체', '사후처리 처리업체', 'c2'], ['운반업체', '운반·운송업체', 'c2'], ['이송방법', '이동·이송 방법', 'c2'],
   ['주의_취급', '취급 시 주의사항 (연구개발용 확인서)', 'c6', 1], ['주의_저장', '저장·보관 방법', 'c6', 1], ['주의_화재', '폭발·화재·누출 시 대처방법', 'c6', 1]];
 window.setSetTab = t => { S.setTab = t; renderSettings(); };
@@ -962,6 +1180,7 @@ function renderSettings() {
   const body = $('setBody');
   if (S.setTab === '업데이트') { renderUpdate(); return; }
   if (S.setTab === '여러 개 등록') { renderBulk(); return; }
+  if (S.setTab === '성분 사전') { renderDict(); return; }
   if (S.setTab === '기타') {
     body.innerHTML = `<div class="box" style="max-width:900px"><h3>서류 공통 값<span class="sp"></span><span class="msg" id="setMsg"></span><button class="primary" onclick="saveEtc()">저장</button></h3>
       <div class="f">${ETC_FIELDS.map(([id, lab, cl, area]) => `<div class="${cl}"><label>${lab}</label>${area ? `<textarea class="plain" id="set_${id}">${esc(setting(id, ''))}</textarea>` : `<input id="set_${id}" value="${esc(setting(id, ''))}">`}</div>`).join('')}</div></div>`;
@@ -985,8 +1204,15 @@ window.tidyAll = async () => {
       if (ic.idCode === r.idcode && ic.coordinates !== r['좌표']) out[t].push({ id: r.id, 좌표: ic.coordinates }); } catch (e) { console.warn(r.id, e); }
   }
   try {
-    for (const t of ['샘플', '단량체']) if (out[t].length) { await call('saveField', S.pw, t, '좌표', out[t]); out[t].forEach(x => { const r = rows(t).find(y => y.id === x.id); if (r) r['좌표'] = x.좌표; }); }
-    S.mols = {}; S.dmols = {}; flash('tidyMsg', `✓ ${out['샘플'].length + out['단량체'].length}개 정리함`); render();
+    // 샘플: 원래 있던 '여러 개 등록' 통로로 50개씩, 단량체: 한 줄씩
+    const sm = out['샘플'].map(x => ({ x, s: S.samples.find(y => y.id === x.id) })).filter(o => o.s && o.s['관리번호']);
+    for (let i = 0; i < sm.length; i += 50) {
+      flash('tidyMsg', `저장 중… ${Math.min(i + 50, sm.length)}/${sm.length}`);
+      await call('runBatchUi', S.pw, sm.slice(i, i + 50).map(o => ({ type: 'updateSample', 관리번호: o.s['관리번호'], data: { 좌표: o.x.좌표 } })), true);
+      sm.slice(i, i + 50).forEach(o => { o.s['좌표'] = o.x.좌표; });
+    }
+    for (const x of out['단량체']) { const r = rows('단량체').find(y => y.id === x.id); if (r) await save('단량체', Object.assign({}, r, { 좌표: x.좌표 })); }
+    S.mols = {}; S.dmols = {}; flash('tidyMsg', `✓ ${sm.length + out['단량체'].length}개 정리함`); render();
   } catch (e) { flash('tidyMsg', '저장하지 못했습니다: ' + errMsg(e), false); }
 };
 window.setSave = async (t, btn) => {
@@ -1158,20 +1384,13 @@ window.openPartner = (kind, id) => {
   openModal('ptBox');
 };
 window.stampUpload = inp => {
-  // 직인 그림: 최대 640픽셀로 유지, 종이(흰색)는 부드럽게 투명, 잉크는 한 가지 빨강으로 → 인쇄해도 선명하게
+  // 직인 그림은 원본 그대로(크기·색 그대로). 흰 종이 부분만 투명하게. 너무 크면(약 33만 자 넘으면) 정수배로만 줄임(점 무늬 유지)
   const f = inp.files[0]; if (!f) return; const img = new Image();
-  img.onload = () => { let size = 640, b64 = '';
-    do { const k = Math.min(1, size / Math.max(img.width, img.height)), cv = document.createElement('canvas'); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
-      const g = cv.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, cv.width, cv.height); const d = g.getImageData(0, 0, cv.width, cv.height), p = d.data;
-      let n = 0, sr = 0, sg = 0, sb = 0;
-      for (let i = 0; i < p.length; i += 4) { const gb = (p[i + 1] + p[i + 2]) / 2; if (p[i + 3] > 200 && gb < 90 && p[i] > 120) { n++; sr += p[i]; sg += p[i + 1]; sb += p[i + 2]; } }
-      const ink = n ? [sr / n, sg / n, sb / n] : [200, 20, 30];
-      for (let i = 0; i < p.length; i += 4) {
-        const gb = (p[i + 1] + p[i + 2]) / 2, red = p[i] - gb, a0 = p[i + 3] / 255;
-        let a = red > 25 ? Math.min(1, Math.max(0, (225 - gb) / 150)) : 0; a *= a0;
-        p[i] = ink[0]; p[i + 1] = ink[1]; p[i + 2] = ink[2]; p[i + 3] = Math.round(a * 255);
-      }
-      g.putImageData(d, 0, 0); b64 = cv.toDataURL('image/png').split(',')[1]; size -= 80; } while (b64.length > 170000 && size > 120);
+  img.onload = () => { let k = 1, b64 = '';
+    do { const cv = document.createElement('canvas'); cv.width = Math.round(img.width / k); cv.height = Math.round(img.height / k);
+      const g = cv.getContext('2d'); g.imageSmoothingEnabled = k > 1 ? false : true; g.drawImage(img, 0, 0, cv.width, cv.height); const d = g.getImageData(0, 0, cv.width, cv.height), p = d.data;
+      for (let i = 0; i < p.length; i += 4) { const w = Math.min(p[i], p[i + 1], p[i + 2]); if (w >= 245) p[i + 3] = 0; else if (w >= 215) p[i + 3] = Math.round(p[i + 3] * (245 - w) / 30); }
+      g.putImageData(d, 0, 0); b64 = cv.toDataURL('image/png').split(',')[1]; k++; } while (b64.length > 440000 && k < 8);
     S.pt.r['직인'] = b64; $('pt_stamp').innerHTML = `<img src="data:image/png;base64,${b64}">`; URL.revokeObjectURL(img.src); };
   img.src = URL.createObjectURL(f);
 };

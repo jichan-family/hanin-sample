@@ -27,7 +27,11 @@ const H = {
   H335: '호흡기계 자극을 일으킬 수 있음', H336: '졸음 또는 현기증을 일으킬 수 있음', H351: '암을 일으킬 것으로 의심됨',
   H361d: '태아에 손상을 일으킬 것으로 의심됨', H361f: '생식능력에 손상을 일으킬 것으로 의심됨',
   H373: '장기간 또는 반복노출 되면 장기에 손상을 일으킬 수 있음', H411: '장기적인 영향에 의해 수생생물에게 유독함', H412: '장기적인 영향에 의해 수생생물에게 유해함',
+  H300: '삼키면 치명적임', H301: '삼키면 유독함', H310: '피부와 접촉하면 치명적임', H311: '피부와 접촉하면 유독함', H312: '피부와 접촉하면 유해함',
+  H314: '피부에 심한 화상과 눈에 손상을 일으킴', H317: '알레르기성 피부 반응을 일으킬 수 있음', H318: '눈에 심한 손상을 일으킴',
+  H400: '수생생물에 매우 유독함', H410: '장기적인 영향에 의해 수생생물에 매우 유독함',
 };
+const H_ORDER = ['H224', 'H225', 'H226', 'H300', 'H301', 'H302', 'H304', 'H310', 'H311', 'H312', 'H314', 'H315', 'H317', 'H318', 'H319', 'H335', 'H336', 'H351', 'H361d', 'H361f', 'H373', 'H400', 'H410', 'H411', 'H412'];
 const P = {
   P201: '사용 전 취급 설명서를 확보하시오.', P202: '모든 안전 예방조치 문구를 읽고 이해하기 전에는 취급하지 마시오.',
   P210: '열, 고온의 표면, 스파크, 화염 및 그 밖의 점화원으로부터 멀리하시오. 금연', P233: '용기를 단단히 밀폐하시오.',
@@ -43,6 +47,8 @@ const P = {
   P314: '불편함을 느끼면 의학적인 조치·조언을 구하시오.', P321: '적절한 응급 처치를 하시오.', P330: '입을 씻어내시오.', P331: '토하게 하지 마시오.',
   'P332+P313': '피부 자극이 생기면 의학적인 조치·조언을 구하시오.', 'P337+P313': '눈에 자극이 지속되면 의학적인 조치·조언을 구하시오.',
   'P362+P364': '오염된 의복은 벗고 다시 사용 전 세척하시오.', 'P370+P378': '화재 시 불을 끄기 위해 분말소화제, 이산화탄소, 알코올 포말을 사용하시오.',
+  P262: '눈, 피부, 의복에 묻지 않도록 하시오.', P272: '작업장 밖으로 오염된 의복을 반출하지 마시오.', P310: '즉시 의료기관(의사)의 진찰을 받으시오.', P363: '다시 사용 전 오염된 의복은 세척하시오.',
+  'P301+P330+P331': '삼켰다면 입을 씻어내시오. 토하게 하지 마시오.', 'P333+P313': '피부 자극성 또는 홍반이 나타나면 의학적인 조치·조언을 구하시오.', 'P361+P364': '오염된 모든 의복은 즉시 벗고 다시 사용 전 세척하시오.',
   P391: '누출물을 모으시오.', 'P403+P233': '환기가 잘 되는 곳에 보관하고 용기는 단단히 밀폐하시오.', 'P403+P235': '환기가 잘 되는 곳에 보관하고 저온으로 유지하시오.',
   P405: '잠금장치가 있는 저장장소에 저장하시오.', P501: '폐기물 관련 법령에 따라 내용물·용기를 폐기하시오.',
 };
@@ -54,6 +60,13 @@ const HP = {
   H351: ['P201', 'P202', 'P280', 'P308+P313', 'P405', 'P501'], H373: ['P260', 'P314', 'P501'], H411: ['P273', 'P391', 'P501'], H412: ['P273', 'P501'],
 };
 HP.H225 = HP.H226 = HP.H224; HP.H336 = HP.H335; HP.H361d = HP.H361f = HP.H351;
+HP.H300 = HP.H301 = ['P264', 'P270', 'P301+P310', 'P321', 'P330', 'P405', 'P501'];
+HP.H310 = HP.H311 = ['P262', 'P264', 'P270', 'P280', 'P302+P352', 'P310', 'P321', 'P361+P364', 'P405', 'P501'];
+HP.H312 = ['P280', 'P302+P352', 'P312', 'P321', 'P362+P364', 'P501'];
+HP.H314 = ['P260', 'P264', 'P280', 'P301+P330+P331', 'P303+P361+P353', 'P304+P340', 'P305+P351+P338', 'P310', 'P321', 'P363', 'P405', 'P501'];
+HP.H317 = ['P261', 'P272', 'P280', 'P302+P352', 'P321', 'P333+P313', 'P362+P364', 'P501'];
+HP.H318 = ['P280', 'P305+P351+P338', 'P310'];
+HP.H400 = ['P273', 'P391', 'P501']; HP.H410 = HP.H400;
 
 // ---------- 용매 9종 (검수 필요: 분류는 EU CLP 조화분류 기준, 노출기준·규제는 국내 자료 확인 필요) ----------
 const SOLV = {
@@ -76,90 +89,160 @@ const SOLV = {
   PGME: { ko: '프로필렌 글리콜 모노메틸 에테르', name: 'PGME', syn: '1-Methoxy-2-propanol', cas: '107-98-2', fp: 32, bp: 120, mp: -97, d: '0.92', vp: '12 hPa (20 °C)', lel: '1.6', uel: '13.8', ait: 270, sol: '물과 혼화', waterSol: true,
     cls: { se3: ['H336'] }, ld50: '5,200 mg/kg (쥐)', twa: '100 ppm, STEL 150 ppm', un: '3092', unName: '1-METHOXY-2-PROPANOL' },
 };
-const SOLV_ORDER = ['EA', 'MEK', 'ACT', 'TOL', 'HEX', 'THF', 'MC', 'PGMEA', 'PGME'];
+SOLV.DMSO = { ko: '디메틸 설폭사이드', name: 'Dimethyl sulfoxide', syn: 'DMSO, Methyl sulfoxide', cas: '67-68-5', fp: 87, bp: 189, mp: 18.4, d: '1.10', vp: '0.55 hPa (20 °C)', lel: '2.6', uel: '42', ait: 215, sol: '물과 혼화', waterSol: true,
+  cls: {}, ld50: '14,500 mg/kg (쥐)', twa: '해당없음', un: '해당없음', unName: '해당없음', law: { 산안법: '해당없음', 화평법: '기존화학물질' }, note: '피부로 빠르게 흡수되며 녹아 있는 다른 물질을 함께 운반할 수 있음' };
+const SOLV_ORDER = ['EA', 'MEK', 'ACT', 'TOL', 'HEX', 'THF', 'MC', 'PGMEA', 'PGME', 'DMSO'];
+SOLV_ORDER.forEach(k => { SOLV[k].liquid = true; SOLV[k].key = k; });
+// 성분 사전 기본값 (설정 → 성분 사전에서 고치거나 더할 수 있음). cls: ate(경구 mg/kg)·ateDerm·skin(1|2)·eye(1|2)·sens·acute(M)·chronic(1|2|3)·chronicM·ox
+const BASE_COMPS = [
+  { name: 'Silver nitrate', ko: '질산은', syn: 'AgNO3', cas: '7761-88-8', liquid: false, cls: { ate: 1173, skin: 1, eye: 1, acute: 1000, chronic: 1, chronicM: 100, ox: true }, ld50: '1,173 mg/kg (쥐)', twa: 'TWA 0.01 mg/m³ (은으로서, 가용성 화합물)', un: '1493', unName: 'SILVER NITRATE', unClass: '5.1', pg: 'II',
+    law: { 산안법: '확인 필요', 화관법: '확인 필요', 화평법: '기존화학물질' }, note: '산화성 고체 구분2(H272) — 혼합물은 시험으로 판정. EU에서 생식독성 1B 분류 논의 중', src: 'EU CLP 조화분류(Annex VI 047-001-00-2), HSE GB CLP 기술보고서' },
+  { name: 'Lithium chloride', ko: '염화리튬', syn: 'LiCl', cas: '7447-41-8', liquid: false, cls: { ate: 526, skin: 2, eye: 2 }, ld50: '526 - 840 mg/kg (쥐)', twa: '해당없음',
+    law: { 산안법: '확인 필요', 화관법: '확인 필요', 화평법: '기존화학물질' }, src: 'Sigma-Aldrich·Avantor SDS, NITE GHS 분류' },
+  { name: 'Lithium bromide', ko: '브롬화리튬', syn: 'LiBr', cas: '7550-35-8', liquid: false, cls: { ate: 500, skin: 2, eye: 2, sens: true }, ld50: '자료없음 (급성독성 구분4)', twa: '해당없음',
+    law: { 산안법: '확인 필요', 화관법: '확인 필요', 화평법: '기존화학물질' }, src: 'Merck SDS (H302, H315, H317, H319)' },
+  { name: 'Copper(II) chloride', ko: '염화구리(II)', syn: 'Cupric chloride, CuCl2', cas: '7447-39-4', liquid: false, cls: { ate: 500, ateDerm: 1100, skin: 2, eye: 1, acute: 1, chronic: 1, chronicM: 1 }, ld50: '자료없음 (급성독성 구분4, 경구·경피)', twa: 'TWA 1 mg/m³ (구리 분진·미스트로서)',
+    law: { 산안법: '확인 필요', 화관법: '확인 필요', 화평법: '기존화학물질' }, src: 'Merck SDS (H302+H312, H315, H318, H410)' },
+  { name: 'Tetrabutylammonium tribromide', ko: '테트라부틸암모늄 트라이브로마이드', syn: 'TBABr3, TBATB', cas: '38932-80-8', liquid: false, cls: { skin: 1, eye: 1 }, ld50: '자료없음', twa: '해당없음', un: '1759', unName: 'CORROSIVE SOLID, N.O.S.', unClass: '8', pg: 'III',
+    law: { 산안법: '확인 필요', 화관법: '확인 필요', 화평법: '확인 필요(국내 신고면제 진행 물질)' }, src: 'TCI SDS (H314, UN1759 8급 III)' },
+  { name: 'Poly(vinyl alcohol)', ko: '폴리비닐알코올', syn: 'PVA', cas: '9002-89-5', liquid: false, cls: {}, ld50: '> 5,000 mg/kg (쥐)', twa: '해당없음',
+    law: { 산안법: '해당없음', 화관법: '해당없음', 화평법: '기존화학물질' }, src: '공급사 SDS (분류 해당없음)' },
+];
+// 성분 자료 찾기: 용매 키 → 사전(사용자) → 기본값, CAS로
+let DICT = [];
+function setDict(list) { DICT = (list || []).map(r => { let o = {}; try { o = JSON.parse(r['자료'] || '{}'); } catch (e) {} return Object.assign({ name: r['이름'], ko: r['국문명'] || '', syn: r['이명'] || '', cas: r['CAS'] || '', src: r['출처'] || '', _id: r.id }, o); }); }
+const normCas = c => String(c || '').trim();
+function compData(c) {
+  if (c.key && SOLV[c.key]) return SOLV[c.key];
+  const cas = normCas(c.cas); if (!cas) return null;
+  return DICT.find(x => normCas(x.cas) === cas) || SOLV_ORDER.map(k => SOLV[k]).find(x => x.cas === cas) || BASE_COMPS.find(x => x.cas === cas) || null;
+}
+function findComp(q) { // 이름·약어·CAS로 (정확히 같은 것만)
+  const t = String(q || '').trim().toLowerCase(); if (!t) return null;
+  const all = [...DICT, ...SOLV_ORDER.map(k => SOLV[k]), ...BASE_COMPS];
+  return all.find(x => [x.cas, x.name, x.ko, x.key, ...String(x.syn || '').split(',')].some(v => String(v || '').trim().toLowerCase() === t)) || null;
+}
 
-// ---------- 혼합물 분류 ----------
+// ---------- 혼합물 분류 (화학물질의 분류·표시 기준의 혼합물 계산 규칙) ----------
 function classify(comps) {
-  // comps: [{key, pct}] 용매만. 용질(신규 물질)은 자료없음
-  const sv = comps.filter(c => SOLV[c.key] && c.pct > 0).map(c => ({ ...c, s: SOLV[c.key] }));
+  // comps: [{name, pct, s}] — s = 성분 자료(없으면 자료없음)
+  const sv = comps.filter(c => c.s && +c.pct > 0).map(c => ({ ...c, pct: +c.pct }));
   const cls = [], hs = new Set(), flags = [];
-  const sum = f => sv.filter(c => f(c.s)).reduce((a, c) => a + c.pct, 0);
-  // 인화성: 5% 이상 들어간 용매 중 가장 낮은 인화점
-  const fl = sv.filter(c => c.s.fp != null && c.pct >= 5);
+  const sum = f => sv.filter(c => f(c.s.cls || {})).reduce((a, c) => a + c.pct, 0);
+  const K = c => c.s.cls || {};
+  // 인화성: 5% 이상 들어간 액체 성분 중 가장 낮은 인화점
+  const fl = sv.filter(c => c.s.liquid && c.s.fp != null && c.pct >= 5);
+  let flash, flamCat = 0;
   if (fl.length) {
     const fp = Math.min(...fl.map(c => c.s.fp)), bp = Math.min(...fl.map(c => c.s.bp));
-    let cat = fp < 23 ? (bp <= 35 ? 1 : 2) : fp <= 60 ? 3 : 0;
+    const cat = fp < 23 ? (bp <= 35 ? 1 : 2) : fp <= 60 ? 3 : 0; flash = fp; flamCat = cat;
     if (cat) { cls.push(`인화성 액체 : 구분${cat}`); hs.add(cat === 1 ? 'H224' : cat === 2 ? 'H225' : 'H226'); flags.push(`혼합물 인화점은 용매 값(${fp} °C)으로 추정 — 실측값이 있으면 확인`); }
-    var flash = fp, flamCat = cat;
   }
-  // 급성독성(경구) 추정치
-  const ateSum = sv.reduce((a, c) => a + (c.s.cls.ate ? c.pct / c.s.cls.ate : 0), 0);
-  if (ateSum > 0 && 100 / ateSum <= 2000) { cls.push('급성 독성(경구) : 구분4'); hs.add('H302'); }
-  if (sum(s => s.cls.skin === 2) >= 10) { cls.push('피부 부식성/피부 자극성 : 구분2'); hs.add('H315'); }
-  if (sum(s => s.cls.eye === 2) >= 10) { cls.push('심한 눈 손상성/눈 자극성 : 구분2'); hs.add('H319'); }
-  if (sv.some(c => c.s.cls.carc && c.pct >= 1)) { cls.push('발암성 : 구분2'); hs.add('H351'); }
-  const repr = sv.filter(c => c.s.cls.repr && c.pct >= 3);
-  if (repr.length) { cls.push('생식독성 : 구분2'); repr.forEach(c => hs.add(c.s.cls.repr)); }
-  if (sum(s => (s.cls.se3 || []).includes('H336')) >= 20) { cls.push('특정표적장기 독성(1회 노출) : 구분3(마취작용)'); hs.add('H336'); }
-  if (sum(s => (s.cls.se3 || []).includes('H335')) >= 20) { cls.push('특정표적장기 독성(1회 노출) : 구분3(호흡기계 자극)'); hs.add('H335'); }
-  if (sv.some(c => c.s.cls.re2 && c.pct >= 10)) { cls.push('특정표적장기 독성(반복 노출) : 구분2'); hs.add('H373'); }
-  if (sum(s => s.cls.asp) >= 10) { cls.push('흡인 유해성 : 구분1'); hs.add('H304'); flags.push('흡인 유해성: 혼합물 동점도가 20.5 mm²/s(40 °C) 이하일 때만 해당 — 고분자 용액은 점도 확인'); }
-  const c2 = sum(s => s.cls.chronic === 2), c3 = sum(s => s.cls.chronic === 3);
-  if (c2 >= 25) { cls.push('만성 수생환경 유해성 : 구분2'); hs.add('H411'); }
-  else if (c2 + c3 >= 25) { cls.push('만성 수생환경 유해성 : 구분3'); hs.add('H412'); }
+  // 급성독성: 가산식(ATE)
+  const ate = (f, cut, hcode, label) => { const s = sv.reduce((a, c) => a + (f(K(c)) ? c.pct / f(K(c)) : 0), 0); if (!s) return; const v = 100 / s, cat = cut.findIndex(x => v <= x);
+    if (cat >= 0) { cls.push(`급성 독성(${label}) : 구분${cat + 1}`); hs.add(hcode[cat]); } };
+  ate(k => k.ate, [5, 50, 300, 2000], ['H300', 'H300', 'H301', 'H302'], '경구');
+  ate(k => k.ateDerm, [50, 200, 1000, 2000], ['H310', 'H310', 'H311', 'H312'], '경피');
+  // 피부 부식성/자극성
+  const S1 = sum(k => k.skin === 1), S2 = sum(k => k.skin === 2);
+  if (S1 >= 5) { cls.push('피부 부식성/피부 자극성 : 구분1'); hs.add('H314'); }
+  else if (10 * S1 + S2 >= 10) { cls.push('피부 부식성/피부 자극성 : 구분2'); hs.add('H315'); }
+  // 눈 손상성/자극성
+  const E1 = sum(k => k.eye === 1 || k.skin === 1), E2 = sum(k => k.eye === 2);
+  if (!hs.has('H314')) {
+    if (E1 >= 3) { cls.push('심한 눈 손상성/눈 자극성 : 구분1'); hs.add('H318'); }
+    else if (10 * E1 + E2 >= 10) { cls.push('심한 눈 손상성/눈 자극성 : 구분2'); hs.add('H319'); }
+  } else cls.push('심한 눈 손상성/눈 자극성 : 구분1');
+  if (sv.some(c => K(c).sens && c.pct >= 1)) { cls.push('피부 과민성 : 구분1'); hs.add('H317'); }
+  if (sv.some(c => K(c).carc && c.pct >= 1)) { cls.push('발암성 : 구분2'); hs.add('H351'); }
+  const repr = sv.filter(c => K(c).repr && c.pct >= 3);
+  if (repr.length) { cls.push('생식독성 : 구분2'); repr.forEach(c => hs.add(K(c).repr)); }
+  if (sum(k => (k.se3 || []).includes('H336')) >= 20) { cls.push('특정표적장기 독성(1회 노출) : 구분3(마취작용)'); hs.add('H336'); }
+  if (sum(k => (k.se3 || []).includes('H335')) >= 20) { cls.push('특정표적장기 독성(1회 노출) : 구분3(호흡기계 자극)'); hs.add('H335'); }
+  if (sv.some(c => K(c).re2 && c.pct >= 10)) { cls.push('특정표적장기 독성(반복 노출) : 구분2'); hs.add('H373'); }
+  if (sum(k => k.asp) >= 10) { cls.push('흡인 유해성 : 구분1'); hs.add('H304'); flags.push('흡인 유해성: 혼합물 동점도가 20.5 mm²/s(40 °C) 이하일 때만 해당 — 고분자 용액은 점도 확인'); }
+  // 수생환경 (M 인자 가산)
+  const A1 = sv.reduce((a, c) => a + (K(c).acute ? K(c).acute * c.pct : 0), 0);
+  if (A1 >= 25) { cls.push('급성 수생환경 유해성 : 구분1'); hs.add('H400'); }
+  const C1 = sv.reduce((a, c) => a + (K(c).chronic === 1 ? (K(c).chronicM || 1) * c.pct : 0), 0), c2 = sum(k => k.chronic === 2), c3 = sum(k => k.chronic === 3);
+  if (C1 >= 25) { cls.push('만성 수생환경 유해성 : 구분1'); hs.add('H410'); }
+  else if (10 * C1 + c2 >= 25) { cls.push('만성 수생환경 유해성 : 구분2'); hs.add('H411'); }
+  else if (100 * C1 + 10 * c2 + c3 >= 25) { cls.push('만성 수생환경 유해성 : 구분3'); hs.add('H412'); }
+  if (sv.some(c => K(c).ox)) flags.push('산화성 성분(' + sv.filter(c => K(c).ox).map(c => c.s.name).join(', ') + ') 포함 — 혼합물의 산화성은 시험으로 판정하므로 분류에 넣지 않음. 확인 필요');
   sv.forEach(c => { if (c.s.note) flags.push(`${c.s.name}: ${c.s.note}`); });
   // 그림문자·신호어
-  const pic = [];
+  const pic = [], has = (...a) => a.some(h => hs.has(h));
   if ([...hs].some(h => /^H22[456]$/.test(h))) pic.push('GHS02');
-  if (hs.has('H304') || hs.has('H351') || hs.has('H361d') || hs.has('H361f') || hs.has('H373')) pic.push('GHS08');
-  if (hs.has('H302') || hs.has('H315') || hs.has('H319') || hs.has('H335') || hs.has('H336')) pic.push('GHS07');
-  if (hs.has('H411')) pic.push('GHS09');
-  const danger = hs.has('H224') || hs.has('H225') || hs.has('H304');
+  if (has('H314', 'H318')) pic.push('GHS05');
+  if (has('H300', 'H301', 'H310', 'H311')) pic.push('GHS06');
+  if (has('H304', 'H351', 'H361d', 'H361f', 'H373')) pic.push('GHS08');
+  const g07 = ['H302', 'H312', 'H315', 'H317', 'H319', 'H335', 'H336'].filter(h => hs.has(h))
+    .filter(h => !(pic.includes('GHS06') && /^H3(02|12)$/.test(h))).filter(h => !(pic.includes('GHS05') && /^H31[59]$/.test(h)));
+  if (g07.length) pic.push('GHS07');
+  if (has('H400', 'H410', 'H411')) pic.push('GHS09');
+  const danger = has('H224', 'H225', 'H304', 'H314', 'H318', 'H300', 'H301', 'H310', 'H311');
   const signal = !hs.size ? '' : danger ? '위험' : '경고';
-  const hl = Object.keys(H).filter(h => hs.has(h));
+  const hl = H_ORDER.filter(h => hs.has(h)).filter(h => !(h === 'H318' && hs.has('H314')));
   const pset = []; hl.forEach(h => (HP[h] || []).forEach(p => { if (!pset.includes(p)) pset.push(p); }));
   const pg = { 예방: pset.filter(p => /^P2/.test(p)), 대응: pset.filter(p => /^P3/.test(p)), 저장: pset.filter(p => /^P4/.test(p)), 폐기: pset.filter(p => /^P5/.test(p)) };
   return { cls, h: hl, p: pg, pic, signal, flags, flash, flamCat, sv };
 }
 
 // ---------- MSDS 내용 ----------
+// 예전 입력(용질 1개 + 용매 키)을 성분 목록으로
+function toComps(inp) {
+  if (Array.isArray(inp.성분)) return inp.성분;
+  const out = [], u = inp.용질 || {};
+  if (u.물질명 || u.cas) out.push({ name: u.물질명 || '', cas: u.cas || '', pct: u.pct, 면제번호: u.면제번호 || '', 종류: inp.용질종류 || '' });
+  (inp.용매 || []).forEach(c => { const s = SOLV[c.key]; if (s) out.push({ name: s.name, cas: s.cas, pct: c.pct, key: c.key }); });
+  return out;
+}
+const LAW_SOLV = '관리대상 유해물질, 작업환경측정 대상, 특수건강진단 대상';
 function msdsContent(inp, company) {
-  // inp: {제품명, 양식, 용도, 성상, 색상, 용질:{물질명,cas,pct,mw,면제번호}, 용매:[{key,pct}], 작성일, 최초작성일, 개정차수}
-  const solv = (inp.용매 || []).filter(c => SOLV[c.key] && +c.pct > 0).map(c => ({ key: c.key, pct: +c.pct }));
-  const C = classify(solv), main = solv.slice().sort((a, b) => b.pct - a.pct)[0], ms = main && SOLV[main.key];
-  const tag = ms ? ` (${ms.name})` : '';
-  const liquid = solv.length > 0;
-  const flam = C.flamCat > 0;
+  // inp: {제품명, 양식, 용도, 성상, 색상, 분자량, 성분:[{name,cas,pct,면제번호,key}], 작성일, 최초작성일, 개정차수}
+  const comps = toComps(inp).filter(c => c.name || c.cas).map(c => ({ ...c, pct: c.pct === '' || c.pct == null ? null : +c.pct, s: compData(c) }));
+  const C = classify(comps);
+  const solv = comps.filter(c => c.s && c.s.liquid && c.pct > 0);
+  const main = solv.slice().sort((a, b) => b.pct - a.pct)[0], ms = main && main.s, tag = ms ? ` (${ms.name})` : '';
+  const liquid = solv.length > 0, flam = C.flamCat > 0;
+  const nodata = comps.filter(c => !c.s), withData = comps.filter(c => c.s);
+  const nm = c => c.s ? c.s.name : (c.name || '(이름 없음)');
+  const short = c => { const n = nm(c); return n.length > 40 ? (c.s ? c.s.syn || '성분' : '용질') : n; };
   const lines = a => a.filter(Boolean).map(x => '- ' + x).join('\n');
-  const perSolv = f => solv.map(c => { const v = f(SOLV[c.key]); return v ? `[${SOLV[c.key].name}] ${v}` : ''; }).filter(Boolean).join('\n') || '자료없음';
-  const sol = inp.용질 || {};
+  const perComp = f => withData.map(c => { const v = f(c.s); return v ? `[${short(c)}] ${v}` : ''; }).filter(Boolean);
+  const has = h => C.h.includes(h), corr = has('H314');
   const out = {};
   out.s1 = { 제품명: inp.제품명, 권고용도: inp.용도 || '연구개발용', 사용제한: '권고 용도 외 사용 금지', 회사명: company.회사명, 주소: company.주소, 긴급전화: company.전화 };
+  const ndTxt = nodata.length ? '\n※ ' + nodata.map(c => `${short(c)}(${c.종류 || (c.cas ? 'CAS ' + c.cas : '신규 물질')})`).join(', ') + '은(는) 유해성 자료 없음' : '';
   out.s2 = {
-    분류: C.cls.length ? C.cls.map(x => '- ' + x).join('\n') + (sol.물질명 ? '\n※ 용질(' + (inp.용질종류 || '신규 물질') + ')은 유해성 자료 없음' : '') : '자료없음',
+    분류: C.cls.length ? C.cls.map(x => '- ' + x).join('\n') + ndTxt : '자료없음',
     그림문자: C.pic, 신호어: C.signal || '해당없음',
-    H: C.h.length ? C.h.map(h => `- ${h.replace(/[df]$/, m => m)} ${H[h]}`).join('\n') : '자료없음',
+    H: C.h.length ? C.h.map(h => `- ${h} ${H[h]}`).join('\n') : '자료없음',
     P: Object.fromEntries(Object.entries(C.p).map(([k, v]) => [k, v.length ? v.map(p => `- ${p} ${P[p]}`).join('\n') : '해당없음'])),
-    기타: lines([C.cls.length ? '' : '유해성 자료가 충분하지 않으므로 주의하여 취급할 것', ...solv.filter(c => SOLV[c.key].note).map(c => SOLV[c.key].note)]) || '자료없음',
+    기타: lines([C.cls.length ? '' : '유해성 자료가 충분하지 않으므로 주의하여 취급할 것', ...withData.filter(c => c.s.note).map(c => `${short(c)}: ${c.s.note}`)]) || '자료없음',
   };
-  const comp = [];
-  if (sol.물질명) comp.push([sol.물질명, '-', sol.cas || '-', sol.pct != null && sol.pct !== '' ? String(sol.pct) : '']);
-  solv.forEach(c => { const s = SOLV[c.key]; comp.push([s.name, s.syn, s.cas, String(c.pct)]); });
-  out.s3 = comp;
-  out.s4 = liquid ? {
+  out.s3 = comps.map(c => [nm(c), c.s ? (c.s.syn || '-') : '-', c.cas || (c.s && c.s.cas) || '-', c.pct != null ? String(c.pct) : '']);
+  out.s4 = corr ? {
+    눈: lines(['즉시 다량의 물로 15분 이상 씻어내시오. 콘택트렌즈는 가능하면 제거하시오.', '즉시 의사의 진찰을 받으시오.']),
+    피부: lines(['오염된 의복을 즉시 벗고 다량의 물로 15분 이상 씻어내시오.', '즉시 의사의 진찰을 받으시오.']),
+    흡입: lines(['신선한 공기가 있는 곳으로 옮기고 호흡하기 쉬운 자세로 안정을 취하시오.', '즉시 의사의 진찰을 받으시오.']),
+    먹었을때: lines(['입을 씻어내시오. 토하게 하지 마시오.', '즉시 의사의 진찰을 받으시오.']),
+    기타: '오염 상황을 의료 관계자에게 알려 적절한 보호조치를 취하도록 하시오.',
+  } : liquid ? {
     눈: lines(['눈을 문지르지 마시오.', '많은 양의 물로 적어도 15분 동안 눈을 씻어내시오.', '증상(발적, 자극 등)이 지속되면 의사의 진찰을 받으시오.']),
     피부: lines(['오염된 의복 및 신발을 벗고 비누와 물로 충분히 씻어내시오.', '오염된 의복은 재사용 전에 세탁하시오.', '자극이 지속되면 의사의 진찰을 받으시오.']),
     흡입: lines(['신선한 공기가 있는 곳으로 옮기고 호흡하기 쉬운 자세로 안정을 취하시오.', '호흡이 없으면 인공호흡을 하시오.', '불편함을 느끼면 의사의 진찰을 받으시오.']),
-    먹었을때: lines([C.h.includes('H304') ? '토하게 하지 마시오(흡인 위험).' : '구토를 유발해야 하는지 의사의 조언을 받으시오.', '물로 입을 씻어내시오.', '즉시 의사의 진찰을 받으시오.']),
+    먹었을때: lines([has('H304') ? '토하게 하지 마시오(흡인 위험).' : '구토를 유발해야 하는지 의사의 조언을 받으시오.', '물로 입을 씻어내시오.', '즉시 의사의 진찰을 받으시오.']),
     기타: '오염 상황을 의료 관계자에게 알려 적절한 보호조치를 취하도록 하시오.',
   } : { 눈: '예방 차원에서 두 눈을 흐르는 물로 씻을 것.', 피부: '피부를 물로 씻으시오/샤워하시오.', 흡입: '신선한 공기가 있는 곳으로 옮기시오. 호흡을 하지 않는 경우 인공호흡을 실시할 것.', 먹었을때: '의식이 없는 사람에게는 어떠한 것도 먹이지 말 것. 물로 입을 헹구시오.', 기타: '본 물질안전보건자료를 담당 의사에게 보일 것.' };
   out.s5 = {
     소화제: flam ? lines(['분말소화제, 이산화탄소, 알코올 포말, 물분무', '직사주수는 피하시오.']) : lines(['물분무, 포말, 분말소화제, 이산화탄소(CO2)']),
-    유해성: flam ? lines([C.flamCat <= 2 ? '고인화성 액체 및 증기' : '인화성 액체 및 증기', '증기는 공기와 폭발성 혼합물을 형성할 수 있음', '가열시 용기가 폭발할 수 있음', '연소 시 탄소산화물 등 유해가스가 발생할 수 있음']) : lines(['연소 시 탄소산화물 등 유해가스가 발생할 수 있음']),
+    유해성: flam ? lines([C.flamCat <= 2 ? '고인화성 액체 및 증기' : '인화성 액체 및 증기', '증기는 공기와 폭발성 혼합물을 형성할 수 있음', '가열시 용기가 폭발할 수 있음', '연소 시 탄소산화물 등 유해가스가 발생할 수 있음'])
+      : lines(['연소 시 탄소산화물 등 유해가스가 발생할 수 있음', withData.some(c => c.s.cls && c.s.cls.ox) ? '산화성 성분이 들어 있어 가연물과 접촉하면 연소를 도울 수 있음' : '']),
     보호구: lines(['화재 진압 시 방화복, 공기호흡기 등 적절한 보호구를 착용하시오.', '관계인 외 접근을 막고 위험 지역의 출입을 금지하시오.', flam ? '용기는 물분무로 냉각하시오.' : '']),
   };
   out.s6 = {
-    인체: lines([flam ? '모든 점화원을 제거하시오.' : '', '증기·미스트를 흡입하지 말고 적절한 보호구를 착용하시오.', '환기를 충분히 하시오.']),
+    인체: lines([flam ? '모든 점화원을 제거하시오.' : '', '증기·미스트·분진을 흡입하지 말고 적절한 보호구를 착용하시오.', '환기를 충분히 하시오.']),
     환경: lines(['누출물이 하수구, 수계, 토양으로 유입되지 않도록 하시오.']),
     정화: lines(['불활성 흡수제(모래, 규조토 등)로 흡수시키시오.', flam ? '스파크가 발생하지 않는 도구를 사용하여 적당한 용기에 수거하시오.' : '적당한 용기에 수거하시오.', '폐기물 관련 법령에 따라 처리하시오.']),
   };
@@ -167,58 +250,73 @@ function msdsContent(inp, company) {
     취급: lines(['환기가 잘 되는 곳에서만 취급하시오.', '눈, 피부, 의복에 접촉하지 않도록 하시오.', flam ? '열, 스파크, 화염 등 점화원으로부터 멀리하고 정전기 방지 조치를 하시오.' : '', '취급 후에는 손을 철저히 씻으시오.']),
     저장: lines(['용기를 단단히 밀폐하여 서늘하고 건조하며 통풍이 잘 되는 곳에 보관하시오.', flam ? '열, 직사광선 및 점화원으로부터 멀리하시오.' : '', '산화제 등 혼합 금지 물질과 분리하여 저장하시오.']),
   };
+  const twa = withData.filter(c => c.s.twa && c.s.twa !== '해당없음').map(c => `${short(c)}: ${/^TWA|^STEL/.test(c.s.twa) ? '' : 'TWA '}${c.s.twa}`);
   out.s8 = {
-    국내: solv.length ? solv.map(c => `${SOLV[c.key].name}: TWA ${SOLV[c.key].twa}`).join('\n') : '해당없음',
+    국내: twa.length ? twa.join('\n') : '해당없음',
     공학: liquid ? '공정격리, 국소배기 등으로 공기 중 농도를 노출기준 이하로 유지하시오.' : '자료없음',
     호흡: liquid ? '노출기준을 초과하거나 증기가 발생하는 경우 유기화합물용 방독마스크를 착용하시오.' : '분진이 발생하는 경우 방진마스크를 착용하시오.',
-    눈: '보안경 또는 고글을 착용하시오.', 손: '화학물질용 보호장갑을 착용하시오.', 신체: '화학물질용 보호복을 착용하시오.',
+    눈: corr ? '보안경과 안면보호구를 착용하시오.' : '보안경 또는 고글을 착용하시오.', 손: '화학물질용 보호장갑을 착용하시오.', 신체: '화학물질용 보호복을 착용하시오.',
   };
   out.s9 = [
     ['성상', inp.성상 || (liquid ? '액체' : '고체')], ['색상', inp.색상 || '자료없음'], ['냄새', '자료없음'], ['냄새역치', '자료없음'], ['pH', '자료없음'],
     ['녹는점/어는점', ms ? `${ms.mp} °C${tag}` : '자료없음'], ['초기 끓는점과 끓는점 범위', ms ? `${ms.bp} °C${tag}` : '자료없음'],
-    ['인화점', C.flash != null ? `${C.flash} °C (밀폐식, 용매 값)` : (solv.some(c => c.key === 'MC') ? '해당없음 (MC)' : '자료없음')],
+    ['인화점', C.flash != null ? `${C.flash} °C (밀폐식, 용매 값)` : ms && ms.fp != null ? `${ms.fp} °C (밀폐식${tag})` : (solv.some(c => c.key === 'MC' || c.s.cas === '75-09-2') ? '해당없음 (MC)' : '자료없음')],
     ['증발속도', '자료없음'], ['인화성(고체, 기체)', '해당없음'],
-    ['인화 또는 폭발 범위의 상한/하한', ms ? `상한 ${ms.uel} %(V) / 하한 ${ms.lel} %(V)${tag}` : '자료없음'],
-    ['증기압', ms ? ms.vp + tag : '자료없음'], ['용해도', ms ? ms.sol + tag : '자료없음'], ['증기밀도', '자료없음'],
-    ['비중', ms ? ms.d + tag : '자료없음'], ['n-옥탄올/물 분배계수', '자료없음'], ['자연발화온도', ms ? `${ms.ait} °C${tag}` : '자료없음'],
-    ['분해온도', '자료없음'], ['점도', '자료없음'], ['분자량', sol.mw ? `${sol.mw}${sol.물질명 ? ' (용질)' : ''}` : '자료없음'],
+    ['인화 또는 폭발 범위의 상한/하한', ms && ms.uel ? `상한 ${ms.uel} %(V) / 하한 ${ms.lel} %(V)${tag}` : '자료없음'],
+    ['증기압', ms && ms.vp ? ms.vp + tag : '자료없음'], ['용해도', ms && ms.sol ? ms.sol + tag : '자료없음'], ['증기밀도', '자료없음'],
+    ['비중', ms && ms.d ? ms.d + tag : '자료없음'], ['n-옥탄올/물 분배계수', '자료없음'], ['자연발화온도', ms && ms.ait ? `${ms.ait} °C${tag}` : '자료없음'],
+    ['분해온도', '자료없음'], ['점도', '자료없음'], ['분자량', inp.분자량 || (inp.용질 && inp.용질.mw) || '자료없음'],
   ];
   out.s10 = {
     안정성: '권장하는 보관 및 취급 조건에서 안정함.' + (solv.some(c => c.key === 'THF') ? '\n- 공기와 장기간 접촉 시 폭발성 과산화물을 생성할 수 있음' : ''),
-    조건: flam ? '열, 스파크, 화염 등 점화원' : '열, 직사광선', 물질: '강산화제', 분해물: '탄소산화물 등',
+    조건: flam ? '열, 스파크, 화염 등 점화원' : '열, 직사광선', 물질: withData.some(c => c.s.cls && c.s.cls.ox) ? '가연성 물질, 환원제, 강산화제' : '강산화제', 분해물: '탄소산화물 등',
   };
   out.s11 = {
-    경로: liquid ? lines(['흡입, 피부 접촉, 눈 접촉, 섭취']) : '자료없음',
-    급성: perSolv(s => `경구 LD50 ${s.ld50}`) + (sol.물질명 ? `\n[${sol.물질명.length > 40 ? '용질' : sol.물질명}] 자료없음` : ''),
-    피부: C.h.includes('H315') ? '피부에 자극을 일으킴' : '자료없음', 눈: C.h.includes('H319') ? '눈에 심한 자극을 일으킴' : '자료없음',
-    과민성: '자료없음', 발암성: C.h.includes('H351') ? '암을 일으킬 것으로 의심됨 (' + solv.filter(c => SOLV[c.key].cls.carc).map(c => SOLV[c.key].name).join(', ') + ')' : '자료없음',
+    경로: lines(['흡입, 피부 접촉, 눈 접촉, 섭취']),
+    급성: [...perComp(s => s.ld50 ? `경구 LD50 ${s.ld50}` : ''), ...nodata.map(c => `[${short(c)}] 자료없음`)].join('\n') || '자료없음',
+    피부: corr ? '피부에 심한 화상과 눈에 손상을 일으킴' : has('H315') ? '피부에 자극을 일으킴' : '자료없음',
+    눈: corr || has('H318') ? '눈에 심한 손상을 일으킴' : has('H319') ? '눈에 심한 자극을 일으킴' : '자료없음',
+    과민성: has('H317') ? '알레르기성 피부 반응을 일으킬 수 있음' : '자료없음',
+    발암성: has('H351') ? '암을 일으킬 것으로 의심됨 (' + withData.filter(c => c.s.cls && c.s.cls.carc).map(short).join(', ') + ')' : '자료없음',
     변이원성: '자료없음', 생식독성: C.h.some(h => /^H361/.test(h)) ? C.h.filter(h => /^H361/.test(h)).map(h => H[h]).join(', ') : '자료없음',
-    se: C.h.includes('H336') ? '졸음 또는 현기증을 일으킬 수 있음' : C.h.includes('H335') ? '호흡기계 자극을 일으킬 수 있음' : '자료없음',
-    re: C.h.includes('H373') ? '장기간 또는 반복노출 되면 장기에 손상을 일으킬 수 있음' : '자료없음', 흡인: C.h.includes('H304') ? '삼켜서 기도로 유입되면 치명적일 수 있음' : '자료없음',
+    se: has('H336') ? '졸음 또는 현기증을 일으킬 수 있음' : has('H335') ? '호흡기계 자극을 일으킬 수 있음' : '자료없음',
+    re: has('H373') ? '장기간 또는 반복노출 되면 장기에 손상을 일으킬 수 있음' : '자료없음', 흡인: has('H304') ? '삼켜서 기도로 유입되면 치명적일 수 있음' : '자료없음',
   };
-  out.s12 = { 생태독성: C.h.includes('H411') ? '장기적인 영향에 의해 수생생물에게 유독함' : C.h.includes('H412') ? '장기적인 영향에 의해 수생생물에게 유해함' : '자료없음', 잔류성: '자료없음', 농축성: '자료없음', 토양: '자료없음', 기타: '자료없음' };
+  out.s12 = { 생태독성: [has('H400') ? H.H400 : '', has('H410') ? H.H410 : has('H411') ? H.H411 : has('H412') ? H.H412 : ''].filter(Boolean).join('\n') || '자료없음', 잔류성: '자료없음', 농축성: '자료없음', 토양: '자료없음', 기타: '자료없음' };
   out.s13 = { 방법: '폐기물관리법 및 관련 법령에 따라 처리하시오.', 주의: '내용물·용기를 폐기물 관련 법령에 따라 폐기하시오. 빈 용기에도 잔류물이 남아 있을 수 있으므로 주의하시오.' };
-  // 14. 운송
-  let t14;
+  // 14. 운송: 인화성 > 부식성 > 환경유해 순
+  let t14; const envHaz = has('H400') || has('H410') || has('H411');
+  const single = comps.length === 1 && comps[0].s;
   if (flam) {
-    const pg = C.flamCat <= 2 ? 'II' : 'III', cont = solv.map(c => SOLV[c.key].name).join(', ');
-    t14 = solv.length === 1 && !sol.물질명 ? { un: SOLV[solv[0].key].un, name: SOLV[solv[0].key].unName, cls: '3', pg } : { un: '1993', name: `FLAMMABLE LIQUID, N.O.S. (contains ${cont})`, cls: '3', pg };
+    const pg = C.flamCat <= 2 ? 'II' : 'III', cont = solv.filter(c => c.s.fp != null).map(c => c.s.name).join(', ');
+    t14 = solv.length === 1 && comps.length === 1 && solv[0].s.un ? { un: solv[0].s.un, name: solv[0].s.unName, cls: '3', pg } : { un: '1993', name: `FLAMMABLE LIQUID, N.O.S. (contains ${cont})`, cls: '3', pg };
     t14.ems = 'F-E, S-E';
-  } else if (solv.some(c => c.key === 'MC')) t14 = { un: '1593', name: 'DICHLOROMETHANE', cls: '6.1', pg: 'III', ems: 'F-A, S-A' };
+  } else if (single && single.un && single.un !== '해당없음') t14 = { un: single.un, name: single.unName, cls: single.unClass || '', pg: single.pg || '', ems: '확인 필요' };
+  else if (corr) { const cont = withData.filter(c => c.s.cls && c.s.cls.skin === 1).map(c => c.s.name).join(', ');
+    t14 = liquid ? { un: '1760', name: `CORROSIVE LIQUID, N.O.S. (contains ${cont})`, cls: '8', pg: 'II', ems: 'F-A, S-B' } : { un: '1759', name: `CORROSIVE SOLID, N.O.S. (contains ${cont})`, cls: '8', pg: 'II', ems: 'F-A, S-B' };
+    C.flags.push('14번 부식성 운송: 용기등급(II/III)은 시험·공급사 자료로 확인'); }
+  else if (envHaz) { const cont = withData.filter(c => c.s.cls && (c.s.cls.acute || c.s.cls.chronic)).map(c => c.s.name).join(', ');
+    t14 = liquid ? { un: '3082', name: `ENVIRONMENTALLY HAZARDOUS SUBSTANCE, LIQUID, N.O.S. (contains ${cont})`, cls: '9', pg: 'III', ems: 'F-A, S-F' } : { un: '3077', name: `ENVIRONMENTALLY HAZARDOUS SUBSTANCE, SOLID, N.O.S. (contains ${cont})`, cls: '9', pg: 'III', ems: 'F-A, S-F' }; }
+  else if (solv.some(c => c.key === 'MC')) t14 = { un: '1593', name: 'DICHLOROMETHANE', cls: '6.1', pg: 'III', ems: 'F-A, S-A' };
   else t14 = { un: '해당없음', name: '해당없음', cls: '해당없음', pg: '해당없음', ems: '해당없음' };
-  t14.marine = C.h.includes('H411') ? '해당' : '해당없음';
+  t14.marine = envHaz ? '해당' : '해당없음';
   out.s14 = t14;
-  // 15. 법적 규제
-  const hazmat = !flam ? '해당없음' : (() => { const fp = C.flash; const cls = fp < 21 ? '제1석유류' : fp < 70 ? '제2석유류' : '제3석유류'; const ws = solv.filter(c => SOLV[c.key].fp != null).every(c => SOLV[c.key].waterSol); return `제4류 인화성 액체, ${cls}, ${ws ? '수용성' : '비수용성'} 액체`; })();
+  // 15. 법적 규제 (성분별)
+  const hazmat = !flam ? '해당없음' : (() => { const fp = C.flash; const cls = fp < 21 ? '제1석유류' : fp < 70 ? '제2석유류' : '제3석유류'; const ws = solv.filter(c => c.s.fp != null).every(c => c.s.waterSol); return `제4류 인화성 액체, ${cls}, ${ws ? '수용성' : '비수용성'} 액체`; })();
+  const lawOf = (c, k) => { const L = c.s && c.s.law; if (L && L[k]) return L[k]; if (c.s && c.s.key && SOLV[c.s.key]) return k === '산안법' ? LAW_SOLV : k === '화평법' ? '기존화학물질' : '해당없음'; return '확인 필요'; };
+  const 화평 = c => c.면제번호 ? `등록·신고 면제확인 완료(${c.면제번호})` : c.s ? lawOf(c, '화평법') : (c.cas ? '확인 필요' : '신규화학물질');
+  const per = (f, skipNone) => comps.map(c => { const v = f(c); return skipNone && (v === '해당없음') ? '' : `${short(c)}${c.cas ? `(CAS No. ${c.cas})` : ''} : ${v}`; }).filter(Boolean).join('\n');
   out.s15 = {
-    산안법: solv.length ? solv.map(c => `${SOLV[c.key].name}: 관리대상 유해물질, 작업환경측정 대상, 특수건강진단 대상`).join('\n') : '해당없음',
-    화관법: '해당없음',
-    화평법: [solv.map(c => `${SOLV[c.key].name}(CAS No. ${SOLV[c.key].cas}) : 기존화학물질`).join('\n'), sol.물질명 ? `${sol.물질명} : ${sol.면제번호 ? '등록·신고 면제확인 완료(' + sol.면제번호 + ')' : (sol.cas && sol.cas !== '-' ? '확인 필요' : '신규화학물질')}` : ''].filter(Boolean).join('\n') || '해당없음',
+    산안법: per(c => c.s ? lawOf(c, '산안법') : '해당없음', true) || '해당없음',
+    화관법: per(c => c.s ? lawOf(c, '화관법') : '해당없음', true) || '해당없음',
+    화평법: per(화평) || '해당없음',
     위험물: hazmat, 폐기물: liquid ? '지정폐기물(폐유기용제)에 해당할 수 있음' : '해당없음', 기타: '해당없음',
   };
-  out.s16 = { 출처: '- 산업안전보건법 제110조 및 고용노동부고시(화학물질의 분류·표시 및 물질안전보건자료에 관한 기준)에 근거하여 작성함.\n- 용매 정보: 공급사 MSDS 및 안전보건공단 화학물질정보', 최초: inp.최초작성일 || inp.작성일, 개정: inp.개정차수 || 0, 최종: inp.개정차수 > 0 ? inp.작성일 : '-',
+  if ([out.s15.산안법, out.s15.화관법, out.s15.화평법].some(t => /확인 필요/.test(t))) C.flags.push('15번 법적 규제에 "확인 필요" 성분이 있음 — 화학물질정보시스템(NCIS)·안전보건공단에서 확인');
+  const srcs = [...new Set(withData.filter(c => c.s.src).map(c => `${short(c)}: ${c.s.src}`))];
+  out.s16 = { 출처: '- 산업안전보건법 제110조 및 고용노동부고시(화학물질의 분류·표시 및 물질안전보건자료에 관한 기준)에 근거하여 작성함.\n- 용매 정보: 공급사 MSDS 및 안전보건공단 화학물질정보' + (srcs.length ? '\n' + srcs.map(x => '- ' + x).join('\n') : ''), 최초: inp.최초작성일 || inp.작성일, 개정: inp.개정차수 || 0, 최종: inp.개정차수 > 0 ? inp.작성일 : '-',
     기타: '위험·유해성 평가가 충분하지 않으므로 반드시 주의하여 취급할 것. 여기에 기재된 내용은 현재 입수한 정보에 근거한 것이며 법령 개정 및 새로운 지식에 따라 개정될 수 있음.' };
-  out.flags = C.flags; out.C = C;
+  out.flags = C.flags; out.C = C; out.comps = comps;
   return out;
 }
 
@@ -307,6 +405,7 @@ async function buildMonomerXlsx(sample, monomers) {
 
 // ---------- 워드 채우기 ----------
 const xmlEsc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const pngSize = b => (b && b.length > 24 && b[1] === 0x50 && b[2] === 0x4E) ? [(b[16] << 24 | b[17] << 16 | b[18] << 8 | b[19]) >>> 0, (b[20] << 24 | b[21] << 16 | b[22] << 8 | b[23]) >>> 0] : null;
 async function fillDocx(b64, map, images) {
   await loadScript('jszip');
   const zip = await JSZip.loadAsync(b64ToBytes(b64));
@@ -317,9 +416,21 @@ async function fillDocx(b64, map, images) {
     if (lines.length > 1) x = x.replace(new RegExp('<w:p\\b(?:(?!<w:p\\b)[\\s\\S])*?' + tok.replace(/[{}]/g, c => '\\' + c) + '[\\s\\S]*?</w:p>', 'g'), p => lines.map(l => p.split(tok).join(xmlEsc(l))).join(''));
     x = x.split(tok).join(xmlEsc(v).replace(/\r?\n/g, '</w:t><w:br/><w:t xml:space="preserve">'));
   });
-  zip.file('word/document.xml', x);
   if (images instanceof Uint8Array) images = { 'word/media/image1.png': images };
-  Object.entries(images || {}).forEach(([p, b]) => { if (b && zip.file(p)) zip.file(p, b); });
+  const rels = await zip.file('word/_rels/document.xml.rels').async('string');
+  Object.entries(images || {}).forEach(([p, b]) => {
+    if (!b || !zip.file(p)) return; zip.file(p, b);
+    // 그림 비율 맞춤(가로 그대로, 세로를 그림 비율로, 가운데 유지)
+    const wh = pngSize(b); if (!wh) return;
+    const rel = rels.match(new RegExp('Id="([^"]+)"[^>]*Target="' + p.replace('word/', '').replace(/[.]/g, '\\.') + '"')); if (!rel) return;
+    x = x.replace(new RegExp('<w:drawing>(?:(?!</w:drawing>)[\\s\\S])*?r:embed="' + rel[1] + '"[\\s\\S]*?</w:drawing>'), dr => {
+      const m = dr.match(/<wp:extent cx="(\d+)" cy="(\d+)"\/>/); if (!m) return dr;
+      const cx = +m[1], cy0 = +m[2], cy = Math.round(cx * wh[1] / wh[0]);
+      return dr.replace(/(<wp:extent cx="\d+" cy=")\d+/, '$1' + cy).replace(/(<a:ext cx="\d+" cy=")\d+/, '$1' + cy)
+        .replace(/(<wp:positionV relativeFrom="\w+"><wp:posOffset>)(-?\d+)/, (a, h, v) => h + (+v - Math.round((cy - cy0) / 2)));
+    });
+  });
+  zip.file('word/document.xml', x);
   return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 }
 async function structurePng(mol, w = 1200, h = 700) {
@@ -400,5 +511,5 @@ async function readNotice(file) {
   };
 }
 
-window.Docs = { templates, buildRnd, buildIdPng, deliver, blobToB64, SOLV, SOLV_ORDER, classify, msdsContent, buildMsdsXlsx, buildMonomerXlsx, buildSelfCheck, buildCasCert, readNotice, download, safeName, ymd, loadScript };
+window.Docs = { setDict, compData, findComp, toComps, BASE_COMPS, templates, buildRnd, buildIdPng, deliver, blobToB64, SOLV, SOLV_ORDER, classify, msdsContent, buildMsdsXlsx, buildMonomerXlsx, buildSelfCheck, buildCasCert, readNotice, download, safeName, ymd, loadScript };
 })();
