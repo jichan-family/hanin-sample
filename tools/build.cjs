@@ -33,6 +33,7 @@ function mk(){ const h={ok:null,no:null}; const p=new Proxy({}, {get:(t,fn)=>{ i
   else if(fn==='saveShipment'){ const o=Object.assign({},a[0]); if(!o.id) o.id='sh'+(++uid); const s=window.S.samples.find(x=>x.id===o['샘플id']); let smp=null; if(s){ const nm=(s['명의']||'').split(',').filter(Boolean); if(!nm.includes(o['명의'])){ nm.push(o['명의']); smp=Object.assign({},s,{명의:nm.join(',')}); } } window.__saved=(window.__saved||[]).concat([['출고',o]]); r={ship:o,sample:smp}; }
   else if(fn==='promoteCompany'){ const nm=a[1]; const co={id:'k'+(++uid),이름:nm,회사명:nm,색:'#8250df',작성서류:'MSDS',MSDS양식:'한인',정식:'Y',순서:'9'}; const moved=window.S.samples.filter(s=>s['관리회사']==='기타'&&s['기타회사']===nm).map(s=>Object.assign({},s,{관리회사:nm})); r={company:co,samples:moved}; }
   else if(fn==='toPdf'){ window.__pdf=(window.__pdf||0)+1; r=btoa('%PDF-1.4 fake'); }
+  else if(fn==='pubchemByCas') r=a[0].map(c=>c==='110-26-9'?{smiles:'C=CC(=O)NCNC(=O)C=C',name:'N,N-Methylenebisacrylamide'}:c==='2495-35-4'?{smiles:'C=CC(=O)OCc1ccccc1',name:'Benzyl acrylate'}:{});
   else if(fn==='lookupPubChem') r=a[0].smiles&&a[0].smiles.length<12?{cas:['64-17-5'],iupac:'ethanol',found:true,names:['Ethanol','Ethyl alcohol','ethanol']}:{cas:[],iupac:'',found:false,names:[]};
   else if(fn==='checkUpdate') r={current:'v0.5.2',repo:window.__repo||'',latest:window.__repo?'v0.5.3':undefined,date:'2026-11-27',notes:'테스트 변경',newer:!!window.__repo};
   else if(fn==='setUpdateRepo'){ window.__repo=a[1]; r=a[1]; }

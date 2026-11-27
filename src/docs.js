@@ -113,7 +113,7 @@ let DICT = [];
 function setDict(list) { DICT = (list || []).map(r => { let o = {}; try { o = JSON.parse(r['자료'] || '{}'); } catch (e) {} return Object.assign({ name: r['이름'], ko: r['국문명'] || '', syn: r['이명'] || '', cas: r['CAS'] || '', src: r['출처'] || '', _id: r.id }, o); }); }
 const normCas = c => String(c || '').trim();
 function compData(c) {
-  if (c.key && SOLV[c.key]) return SOLV[c.key];
+  if (c.key && SOLV[c.key]) return DICT.find(x => normCas(x.cas) === SOLV[c.key].cas) || SOLV[c.key]; // 사전에서 고친 용매가 있으면 그것
   const cas = normCas(c.cas); if (!cas) return null;
   return DICT.find(x => normCas(x.cas) === cas) || SOLV_ORDER.map(k => SOLV[k]).find(x => x.cas === cas) || BASE_COMPS.find(x => x.cas === cas) || null;
 }
@@ -188,6 +188,8 @@ function classify(comps) {
   return { cls, h: hl, p: pg, pic, signal, flags, flash, flamCat, sv };
 }
 
+// 단일 물질의 H 코드(성분 사전 화면용)
+function hOf(d) { const r = classify([{ name: d.name, pct: 100, s: d }]); const h = [...r.h]; if ((d.cls || {}).ox && !h.includes('H272')) h.push('H272'); return h; }
 // ---------- MSDS 내용 ----------
 // 예전 입력(용질 1개 + 용매 키)을 성분 목록으로
 function toComps(inp) {
@@ -267,6 +269,7 @@ function msdsContent(inp, company) {
     ['비중', ms && ms.d ? ms.d + tag : '자료없음'], ['n-옥탄올/물 분배계수', '자료없음'], ['자연발화온도', ms && ms.ait ? `${ms.ait} °C${tag}` : '자료없음'],
     ['분해온도', '자료없음'], ['점도', '자료없음'], ['분자량', inp.분자량 || (inp.용질 && inp.용질.mw) || '자료없음'],
   ];
+  out.s9ul = { 상한: ms && ms.uel ? `${ms.uel} %(V)${tag}` : '자료없음', 하한: ms && ms.lel ? `${ms.lel} %(V)${tag}` : '자료없음' };
   out.s10 = {
     안정성: '권장하는 보관 및 취급 조건에서 안정함.' + (solv.some(c => c.key === 'THF') ? '\n- 공기와 장기간 접촉 시 폭발성 과산화물을 생성할 수 있음' : ''),
     조건: flam ? '열, 스파크, 화염 등 점화원' : '열, 직사광선', 물질: withData.some(c => c.s.cls && c.s.cls.ox) ? '가연성 물질, 환원제, 강산화제' : '강산화제', 분해물: '탄소산화물 등',
@@ -321,69 +324,201 @@ function msdsContent(inp, company) {
 }
 
 // ---------- 엑셀 MSDS ----------
-async function buildMsdsXlsx(inp, company) {
+// 공통: 회사 양식 고르기
+async function buildMsdsXlsx(inp, company) { return inp.양식 === '엘에스켐' ? buildMsdsLs(inp, company) : buildMsdsHanin(inp, company); }
+const dotYmd = d => String(d || '').replace(/-/g, '.');
+const vlen = t => [...String(t || '')].reduce((a, ch) => a + (/[ᄀ-ᇿ　-鿿가-힯＀-￯]/.test(ch) ? 1.75 : 1), 0);
+const nLines = (t, w) => String(t == null ? '' : t).split('\n').reduce((a, l) => a + Math.max(1, Math.ceil(vlen(l) / w)), 0);
+const cut = t => String(t || '').replace(/^- /gm, '').trim();
+// 단락별 값(여러 성분이면 "[이름] 값")
+function msdsBits(M) {
+  const C = M.C, has = h => C.h.includes(h), comps = M.comps, nm = c => c.s ? c.s.name : (c.name || '(이름 없음)');
+  const per = f => comps.map(c => `[${nm(c)}] : ${(c.s && f(c.s)) || '자료없음'}`).join('\n');
+  const unclassified = !C.cls.length;
+  const acute = C.h.filter(h => /^H3(00|01|02|10|11|12)$/.test(h)).map(h => H[h]).join(', ');
+  return { has, per, nm, unclassified, acute,
+    호흡기: has('H336') ? '졸음 또는 현기증을 일으킬 수 있음' : has('H335') ? '호흡기계 자극을 일으킬 수 있음' : '자료없음',
+    경구: C.h.filter(h => /^H30[012]$/.test(h)).map(h => H[h]).join(', ') || (has('H304') ? H.H304 : '자료없음'),
+    눈피부: [M.s11.피부, M.s11.눈].filter(x => x !== '자료없음').join(', ') || '자료없음',
+    t14: M.s14.un === '해당없음' ? '위험하지 않은 상품' : `UN ${M.s14.un}, ${M.s14.name}, 등급 ${M.s14.cls}${M.s14.pg && M.s14.pg !== '해당없음' ? `, 용기등급 ${M.s14.pg}` : ''}` };
+}
+
+// 한인 양식: 기존 회사 MSDS와 비슷한 모양, 손으로 고치기 쉽게(내용은 E열 한 칸, 병합은 머리말 상자·구성성분 표만)
+async function buildMsdsHanin(inp, company) {
   await loadScript('exceljs'); const T = await templates();
-  const M = msdsContent(inp, company);
-  const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('MSDS', { pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 } } });
-  ws.columns = [{ width: 34 }, { width: 34 }, { width: 22 }, { width: 13 }];
-  const font = { name: '맑은 고딕', size: 9.5 }, bd = { style: 'thin', color: { argb: 'FFBFBFBF' } }, border = { top: bd, left: bd, bottom: bd, right: bd };
-  let r = 1;
-  const est = (t, w) => String(t || '').split('\n').reduce((a, l) => a + Math.max(1, Math.ceil(l.length * 1.6 / w)), 0);
-  const cell = (addr, v, o = {}) => { const c = ws.getCell(addr); c.value = v; c.font = { ...font, ...(o.font || {}) }; c.alignment = { vertical: 'middle', wrapText: true, ...(o.align || {}) }; c.border = border; if (o.fill) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: o.fill } }; return c; };
-  const title = (t) => { ws.mergeCells(`A${r}:D${r}`); cell(`A${r}`, t, { font: { bold: true, size: 11 }, fill: 'FFE7EEF7' }); ws.getRow(r).height = 20; r++; };
-  const kv = (k, v, o = {}) => { ws.mergeCells(`B${r}:D${r}`); cell(`A${r}`, k, { font: { bold: !!o.bold } }); cell(`B${r}`, v == null || v === '' ? '자료없음' : v); ws.getRow(r).height = Math.max(18, 14 * est(v, 66)); r++; };
-  ws.mergeCells('A1:D2'); cell('A1', '물질안전보건자료\n(Material Safety Data Sheet)', { font: { bold: true, size: 16 }, align: { horizontal: 'center' } }); ws.getRow(1).height = 26; ws.getRow(2).height = 26; r = 3;
-  ws.mergeCells(`A${r}:D${r}`); cell(`A${r}`, inp.제품명, { font: { bold: true, size: 13 }, align: { horizontal: 'center' } }); ws.getRow(r).height = 24; r += 2;
-  title('1. 화학제품과 회사에 관한 정보');
-  kv('  가. 제품명', M.s1.제품명); kv('  나. 제품의 권고 용도', M.s1.권고용도); kv('      제품의 사용상의 제한', M.s1.사용제한);
-  kv('  다. 공급자 정보 - 회사명', M.s1.회사명); kv('      주소', M.s1.주소); kv('      긴급전화번호', M.s1.긴급전화);
-  title('2. 유해성·위험성');
-  kv('  가. 유해성·위험성 분류', M.s2.분류);
-  kv('  나. 예방조치문구를 포함한 경고표지 항목', ''); ws.getCell(`B${r - 1}`).value = '';
-  // 그림문자
-  ws.mergeCells(`B${r}:D${r}`); cell(`A${r}`, '      그림문자'); cell(`B${r}`, M.s2.그림문자.length ? '' : '해당없음'); ws.getRow(r).height = M.s2.그림문자.length ? 62 : 18;
-  M.s2.그림문자.forEach((g, i) => { const id = wb.addImage({ base64: 'data:image/png;base64,' + T.ghs[g], extension: 'png' }); ws.addImage(id, { tl: { nativeCol: 1, nativeColOff: (6 + i * 80) * 9525, nativeRow: r - 1, nativeRowOff: 5 * 9525 }, ext: { width: 72, height: 72 }, editAs: 'oneCell' }); });
-  r++;
-  kv('      신호어', M.s2.신호어); kv('      유해·위험문구', M.s2.H);
-  ['예방', '대응', '저장', '폐기'].forEach(k => kv('      예방조치문구 - ' + k, M.s2.P[k]));
-  kv('  다. 기타 유해성·위험성', M.s2.기타);
-  title('3. 구성성분의 명칭 및 함유량');
-  ['화학물질명', '관용명 및 이명', 'CAS 번호', '함유량(%)'].forEach((h, i) => cell(String.fromCharCode(65 + i) + r, h, { font: { bold: true }, align: { horizontal: 'center' }, fill: 'FFF5F5F5' })); r++;
-  M.s3.forEach(row => { row.forEach((v, i) => cell(String.fromCharCode(65 + i) + r, v, { align: i ? { horizontal: 'center' } : {} })); ws.getRow(r).height = Math.max(18, 14 * est(row[0], 34)); r++; });
-  title('4. 응급조치 요령');
-  kv('  가. 눈에 들어갔을 때', M.s4.눈); kv('  나. 피부에 접촉했을 때', M.s4.피부); kv('  다. 흡입했을 때', M.s4.흡입); kv('  라. 먹었을 때', M.s4.먹었을때); kv('  마. 기타 의사의 주의사항', M.s4.기타);
-  title('5. 폭발·화재 시 대처방법');
-  kv('  가. 적절한(부적절한) 소화제', M.s5.소화제); kv('  나. 화학물질로부터 생기는 특정 유해성', M.s5.유해성); kv('  다. 화재진압 시 착용할 보호구 및 예방조치', M.s5.보호구);
-  title('6. 누출 사고 시 대처방법');
-  kv('  가. 인체를 보호하기 위해 필요한 조치사항 및 보호구', M.s6.인체); kv('  나. 환경을 보호하기 위해 필요한 조치사항', M.s6.환경); kv('  다. 정화 또는 제거 방법', M.s6.정화);
-  title('7. 취급 및 저장방법');
-  kv('  가. 안전취급요령', M.s7.취급); kv('  나. 안전한 저장 방법', M.s7.저장);
-  title('8. 노출방지 및 개인보호구');
-  kv('  가. 노출기준(국내)', M.s8.국내); kv('  나. 적절한 공학적 관리', M.s8.공학); kv('  다. 개인보호구 - 호흡기', M.s8.호흡); kv('      눈', M.s8.눈); kv('      손', M.s8.손); kv('      신체', M.s8.신체);
-  title('9. 물리화학적 특성');
-  const ko = '가나다라마바사아자차카타파하거너더러머버서어저';
-  M.s9.forEach(([k, v], i) => kv(`  ${ko[i]}. ${k}`, v));
-  title('10. 안정성 및 반응성');
-  kv('  가. 화학적 안정성 및 유해 반응의 가능성', M.s10.안정성); kv('  나. 피해야 할 조건', M.s10.조건); kv('  다. 피해야 할 물질', M.s10.물질); kv('  라. 분해 시 생성되는 유해물질', M.s10.분해물);
-  title('11. 독성에 관한 정보');
-  kv('  가. 가능성이 높은 노출 경로', M.s11.경로); kv('  나. 급성 독성', M.s11.급성); kv('      피부 부식성 또는 자극성', M.s11.피부); kv('      심한 눈 손상 또는 자극성', M.s11.눈);
-  kv('      호흡기·피부 과민성', M.s11.과민성); kv('      발암성', M.s11.발암성); kv('      생식세포 변이원성', M.s11.변이원성); kv('      생식독성', M.s11.생식독성);
-  kv('      특정표적장기 독성(1회 노출)', M.s11.se); kv('      특정표적장기 독성(반복 노출)', M.s11.re); kv('      흡인 유해성', M.s11.흡인);
-  title('12. 환경에 미치는 영향');
-  kv('  가. 생태독성', M.s12.생태독성); kv('  나. 잔류성 및 분해성', M.s12.잔류성); kv('  다. 생물 농축성', M.s12.농축성); kv('  라. 토양 이동성', M.s12.토양); kv('  마. 기타 유해 영향', M.s12.기타);
-  title('13. 폐기 시 주의사항');
-  kv('  가. 폐기방법', M.s13.방법); kv('  나. 폐기 시 주의사항', M.s13.주의);
-  title('14. 운송에 필요한 정보');
-  kv('  가. 유엔번호(UN No.)', M.s14.un); kv('  나. 유엔 적정 선적명', M.s14.name); kv('  다. 운송에서의 위험성 등급', M.s14.cls); kv('  라. 용기등급', M.s14.pg); kv('  마. 해양오염물질', M.s14.marine);
-  kv('  바. 특별한 안전대책(비상조치 EmS)', M.s14.ems);
-  title('15. 법적 규제현황');
-  kv('  가. 산업안전보건법에 의한 규제', M.s15.산안법); kv('  나. 화학물질관리법에 의한 규제', M.s15.화관법); kv('  다. 화학물질의 등록 및 평가 등에 관한 법률에 의한 규제', M.s15.화평법);
-  kv('  라. 위험물안전관리법에 의한 규제', M.s15.위험물); kv('  마. 폐기물관리법에 의한 규제', M.s15.폐기물); kv('  바. 기타 국내 및 외국법에 의한 규제', M.s15.기타);
-  title('16. 그 밖의 참고사항');
-  kv('  가. 자료의 출처', M.s16.출처); kv('  나. 최초 작성일자', M.s16.최초); kv('  다. 개정 횟수 및 최종 개정일자', `${M.s16.개정}회 / ${M.s16.최종}`); kv('  라. 기타', M.s16.기타);
-  ws.headerFooter.oddFooter = `&L${inp.제품명}&C&P / &N&R${company.회사명}`;
+  const M = msdsContent(inp, company), B = msdsBits(M);
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('MSDS', { views: [{ showGridLines: false }], pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true, margins: { left: 0.6, right: 0.6, top: 0.5, bottom: 0.6, header: 0.3, footer: 0.3 } } });
+  ws.columns = [{ width: 1.6 }, { width: 4.5 }, { width: 25 }, { width: 2.3 }, { width: 50 }, { width: 11 }, { width: 11 }];
+  const F = { name: '맑은 고딕', size: 10 }, navy = 'FF1F3B73', thin = { style: 'thin', color: { argb: 'FF000000' } };
+  const put = (addr, v, o = {}) => { const c = ws.getCell(addr); c.value = v == null ? '' : v; c.font = { ...F, ...(o.font || {}) }; c.alignment = { vertical: o.v || 'top', wrapText: true, ...(o.align || {}) }; if (o.border) c.border = o.border; return c; };
+  const box = (r1, c1, r2, c2) => { for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) { const cell = ws.getCell(r, c); cell.border = { top: r === r1 ? thin : cell.border && cell.border.top, bottom: r === r2 ? thin : cell.border && cell.border.bottom, left: c === c1 ? thin : cell.border && cell.border.left, right: c === c2 ? thin : cell.border && cell.border.right }; } };
+  // 머리말(매 쪽 반복): 로고 · 제목 · 관리번호 상자
+  [2, 3, 4].forEach(r => ws.getRow(r).height = 17); ws.getRow(1).height = 6; ws.getRow(5).height = 10;
+  ws.mergeCells('B2:C4'); ws.mergeCells('D2:E4');
+  put('D2', '물질안전보건자료(MSDS)', { font: { bold: true, size: 16 }, v: 'middle', align: { horizontal: 'center' } });
+  [['관리번호', inp.관리번호 || ''], ['최초작성일', dotYmd(M.s16.최초)], ['최종개정일', M.s16.개정 > 0 ? dotYmd(M.s16.최종) : '']].forEach(([k, v], i) => {
+    put('F' + (2 + i), k, { font: { size: 8 }, v: 'middle', align: { horizontal: 'center' }, border: { top: thin, bottom: thin, left: thin, right: thin } });
+    put('G' + (2 + i), v, { font: { size: 8 }, v: 'middle', align: { horizontal: 'center' }, border: { top: thin, bottom: thin, left: thin, right: thin } }); });
+  box(2, 2, 4, 3); box(2, 4, 4, 5);
+  if (T.logoHanin) { const id = wb.addImage({ base64: 'data:image/png;base64,' + T.logoHanin, extension: 'png' }); ws.addImage(id, { tl: { nativeCol: 1, nativeColOff: 12 * 9525, nativeRow: 1, nativeRowOff: 5 * 9525 }, ext: { width: 168, height: 56 }, editAs: 'oneCell' }); }
+  ws.pageSetup.printTitlesRow = '2:5';
+  ws.headerFooter.oddFooter = '&C&"맑은 고딕"&9한인정밀화학(주)    A4(210x297mm)';
+  let r = 6;
+  const KO = '가나다라마바사아자차카타파하거너더러머버서어저처커터퍼허';
+  const sec = t => { if (r > 6) { ws.getRow(r).height = 8; r++; } put('B' + r, t, { font: { bold: true }, v: 'bottom', align: { wrapText: false } }); ['B', 'C', 'D', 'E', 'F', 'G'].forEach(c => { ws.getCell(c + r).border = { bottom: { style: 'medium', color: { argb: navy } } }; }); ws.getRow(r).height = 20; r++; ws.getRow(r).height = 5; r++; };
+  // 항목: no=가나다 번호(없으면 들여쓴 하위 항목), 값은 E열 한 칸
+  const item = (no, label, val) => {
+    if (no != null) put('B' + r, KO[no] + '.', { align: { horizontal: 'right' } });
+    put('C' + r, no == null ? '  ' + label : label, val === undefined ? { align: { wrapText: false } } : {});
+    if (val !== undefined) { put('D' + r, ':', { align: { horizontal: 'center' } }); put('E' + r, val === '' || val == null ? '자료없음' : cut(val)); }
+    const h = Math.max(val !== undefined ? nLines(label, 23) : 1, val !== undefined ? nLines(cut(val), 48) : 1); ws.getRow(r).height = Math.max(18, 14.5 * h + 3); r++;
+  };
+  sec('1. 화학제품과 회사에 관한 정보');
+  item(0, '제품명', M.s1.제품명); item(1, '제품의 권고 용도와 사용상의 제한'); item(null, '권고용도', M.s1.권고용도); item(null, '사용상의 제한', M.s1.사용제한);
+  item(2, '제조자/수입자/유통업자 정보'); item(null, '회사명', M.s1.회사명); item(null, '주소', M.s1.주소); item(null, '긴급전화번호', M.s1.긴급전화);
+  sec('2. 유해성·위험성');
+  if (B.unclassified) {
+    item(0, '유해성·위험성 분류', '본 제품은 산업안전보건법 제104조에 따른 분류기준에 따라 분류되지 않음.' + (M.s2.분류 !== '자료없음' ? '\n' + M.s2.분류 : ''));
+    item(1, '예방조치 문구를 포함한 경고 표지 항목', '본 제품은 산업안전보건법 제104조에 따른 분류기준에 따라 분류되지 않으므로 동법 제110조 제1항에 따른 대상화학물질에 해당되지 않으며 물질안전보건자료 작성 및 경고표지 부착 대상이 아님.');
+  } else {
+    item(0, '유해성·위험성 분류', M.s2.분류); item(1, '예방조치 문구를 포함한 경고 표지 항목');
+    const pr = r; item(null, '그림문자', M.s2.그림문자.length ? ' ' : '해당없음');
+    if (M.s2.그림문자.length) { ws.getRow(pr).height = 62; ws.getCell('E' + pr).value = '';
+      M.s2.그림문자.forEach((g, i) => { const id = wb.addImage({ base64: 'data:image/png;base64,' + T.ghs[g], extension: 'png' }); ws.addImage(id, { tl: { nativeCol: 4, nativeColOff: (4 + i * 80) * 9525, nativeRow: pr - 1, nativeRowOff: 4 * 9525 }, ext: { width: 74, height: 74 }, editAs: 'oneCell' }); }); }
+    item(null, '신호어', M.s2.신호어); item(null, '유해·위험 문구', M.s2.H);
+    ['예방', '대응', '저장', '폐기'].forEach(k => item(null, '예방조치 문구 - ' + k, M.s2.P[k]));
+  }
+  item(2, '유해성·위험성 분류기준에 포함되지 않는 기타 유해성·위험성', M.s2.기타);
+  sec('3. 구성성분의 명칭 및 함유량');
+  const tb = { top: thin, bottom: thin, left: thin, right: thin };
+  ws.mergeCells(`B${r}:E${r}`); put('B' + r, '화학물질명 / 관용명 및 이명(異名)', { v: 'middle', align: { horizontal: 'center' }, border: tb }); put('F' + r, 'CAS 번호 또는 식별번호', { v: 'middle', align: { horizontal: 'center' }, font: { size: 9 }, border: tb }); put('G' + r, '함유량(%)', { v: 'middle', align: { horizontal: 'center' }, border: tb });
+  ['C', 'D', 'E'].forEach(c => ws.getCell(c + r).border = tb); ws.getRow(r).height = 30; r++;
+  M.s3.forEach(([n, syn, cas, pct]) => { ws.mergeCells(`B${r}:E${r}`); const t = syn && syn !== '-' ? `${n}\n(${syn})` : n;
+    put('B' + r, t, { v: 'middle', align: { horizontal: 'center' }, border: tb }); ['C', 'D', 'E'].forEach(c => ws.getCell(c + r).border = tb);
+    put('F' + r, cas, { v: 'middle', align: { horizontal: 'center' }, border: tb }); put('G' + r, pct === '' ? '' : pct, { v: 'middle', align: { horizontal: 'center' }, border: tb });
+    ws.getRow(r).height = Math.max(30, 14.5 * nLines(t, 72) + 10); r++; });
+  sec('4. 응급조치 요령');
+  item(0, '눈에 들어갔을 때', M.s4.눈); item(1, '피부에 접촉했을 때', M.s4.피부); item(2, '흡입했을 때', M.s4.흡입); item(3, '먹었을 때', M.s4.먹었을때);
+  item(4, '급성 증상 / 영향', [B.acute, M.s11.피부 !== '자료없음' ? M.s11.피부 : '', M.s11.눈 !== '자료없음' ? M.s11.눈 : ''].filter(Boolean).join(', ') || '자료없음');
+  item(5, '지연 증상 / 영향', '자료없음');
+  item(6, '기타 의사의 주의사항', B.unclassified ? '자료없음' : M.s4.기타);
+  item(7, '일반적인 조치 사항', '응급처치자는 자신을 보호할 필요가 있음.\n본 물질안전보건자료를 담당 의사에게 보일 것.');
+  sec('5. 폭발·화재시 대처방법');
+  item(0, '적절한(및 부적절한) 소화제', M.s5.소화제); item(1, '화학물질로부터 생기는 특정 유해성(예, 연소 시 발생 유해물질)', M.s5.유해성); item(2, '화재 진압 시 착용할 보호구 및 예방조치', M.s5.보호구);
+  sec('6. 누출 사고시 대처방법');
+  item(0, '인체를 보호하기 위해 필요한 조치 사항 및 보호구', M.s6.인체); item(1, '환경을 보호하기 위해 필요한 조치사항', M.s6.환경); item(2, '정화 또는 제거 방법', M.s6.정화);
+  sec('7. 취급 및 저장방법');
+  item(0, '안전취급요령', M.s7.취급); item(1, '안전한 저장 방법(피해야 할 조건을 포함함)', M.s7.저장);
+  sec('8. 노출방지 및 개인보호구');
+  item(0, '노출기준', M.s8.국내 === '해당없음' ? '직업상 노출 기준 값에 해당하는 물질을 함유하지 않음.' : M.s8.국내); item(1, '적절한 공학적 관리', M.s8.공학); item(2, '개인 보호구');
+  item(null, '호흡기 보호', M.s8.호흡); item(null, '눈 보호', M.s8.눈); item(null, '손 보호', M.s8.손); item(null, '신체 보호', M.s8.신체); item(null, '위생상 주의사항', '오염된 작업복은 즉시 바꾸고, 취급 후에는 손을 씻으시오.');
+  sec('9. 물리화학적 특성');
+  const s9 = Object.fromEntries(M.s9);
+  [['외관 (물리적 상태, 색 등)', [s9['성상'], s9['색상'] !== '자료없음' ? s9['색상'] : ''].filter(Boolean).join(', ')], ['냄새', s9['냄새']], ['냄새 역치', s9['냄새역치']], ['pH', s9['pH']], ['녹는점/어는점', s9['녹는점/어는점']], ['초기 끓는점과 끓는점 범위', s9['초기 끓는점과 끓는점 범위']],
+    ['인화점', s9['인화점']], ['증발 속도', s9['증발속도']], ['인화성(고체, 기체)', s9['인화성(고체, 기체)']]].forEach(([k, v], i) => item(i, k, v));
+  item(9, '인화 또는 폭발 범위의 상한/하한'); item(null, '상한값', M.s9ul.상한); item(null, '하한값', M.s9ul.하한);
+  [['증기압', s9['증기압']], ['용해도', s9['용해도']], ['증기밀도', s9['증기밀도']], ['비중', s9['비중']], ['n 옥탄올/물 분배계수', s9['n-옥탄올/물 분배계수']], ['자연발화 온도', s9['자연발화온도']], ['분해 온도', s9['분해온도']], ['점도', s9['점도']], ['분자량', s9['분자량']]].forEach(([k, v], i) => item(10 + i, k, v));
+  sec('10. 안정성 및 반응성');
+  item(0, '화학적 안정성 및 유해 반응의 가능성', M.s10.안정성); item(1, '피해야 할 조건 (정전기 방전, 충격, 진동 등)', M.s10.조건); item(2, '피해야 할 물질', M.s10.물질); item(3, '분해시 생성되는 유해물질', M.s10.분해물); item(4, '열분해', '자료없음');
+  sec('11. 독성에 관한 정보');
+  item(0, '가능성이 높은 노출 경로에 관한 정보'); item(null, '호흡기', B.호흡기); item(null, '경구', B.경구); item(null, '눈·피부', B.눈피부);
+  item(1, '건강 유해성 정보'); item(null, '급성 독성(노출 가능한 모든 경로에 대해 기재)', B.acute || '자료없음'); item(null, '피부 부식성 또는 자극성', M.s11.피부); item(null, '심한 눈 손상 또는 자극성', M.s11.눈);
+  item(null, '호흡기 또는 피부과민성', M.s11.과민성); item(null, '발암성', M.s11.발암성); item(null, '생식세포 변이원성', M.s11.변이원성); item(null, '생식독성', M.s11.생식독성);
+  item(null, '특정표적장기 독성 (1회 노출)', M.s11.se); item(null, '특정표적장기 독성 (반복 노출)', M.s11.re); item(null, '노출시 징후와 증상', '자료없음');
+  item(null, '독성의 수치적 척도(급성독성 추정치 등)', M.s11.급성); item(null, '흡인 유해성', M.s11.흡인); item(null, '추가정보', '자료없음');
+  sec('12. 환경에 미치는 영향');
+  item(0, '생태독성', M.s12.생태독성); item(1, '잔류성 및 분해성', M.s12.잔류성); item(2, '생물 농축성', M.s12.농축성); item(3, '토양 이동성', M.s12.토양); item(4, '오존층유해성', '자료없음');
+  sec('13. 폐기시 주의사항');
+  item(0, '폐기방법', M.s13.방법); item(1, '폐기시 주의사항(오염된 용기 및 포장의 폐기 방법을 포함함)', M.s13.주의);
+  sec('14. 운송에 필요한 정보');
+  item(0, 'IMDG', B.t14 + (M.s14.un !== '해당없음' ? `, EmS ${M.s14.ems}, 해양오염물질 ${M.s14.marine}` : '')); item(1, 'IATA', B.t14); item(2, '그 밖의 참고사항', '자료없음');
+  sec('15. 법적 규제현황');
+  item(0, '산업안전보건법에 의한 규제', M.s15.산안법); item(1, '화학물질관리법에 의한 규제', M.s15.화관법); item(2, '화학물질의 등록 및 평가 등에 관한 법률에 의한 규제', M.s15.화평법);
+  item(3, '위험물안전관리법에 의한 규제', M.s15.위험물); item(4, '폐기물관리법에 의한 규제', M.s15.폐기물); item(5, '기타 국내 및 외국법에 의한 규제', M.s15.기타);
+  sec('16. 그 밖의 참고사항');
+  item(0, '자료의 출처', M.s16.출처); item(1, '최초 작성일자', dotYmd(M.s16.최초)); item(2, '개정 횟수 및 최종 개정일자', M.s16.개정 > 0 ? `${M.s16.개정}회 / ${dotYmd(M.s16.최종)}` : '-');
+  item(3, '기타', '본 MSDS는 산업안전보건법 및 「화학물질의 분류·표시 및 물질안전보건자료에 관한 기준」 [별표 4] 양식에 맞게 작성하였으며, 국내 관련 규제법규 현황 등을 추가하였습니다.\n국내 관련 규제법규 현황은 본 제품의 용도나 알려진 성분으로 판단한 것이므로 완전히 일치하지 않을 수 있으며, 새로운 법령의 제정 및 개정을 통하여 수시로 바뀔 수 있습니다.\n본 MSDS는 현재의 알려진 지식 경험 및 관련자료에 근거하여 작성된 것이나 제품자체를 완전히 보증하는 것은 아닙니다. 알려지지 않은 위험성이 나타날 수 있기 때문에 주의해서 사용해야 합니다.');
+  ws.pageSetup.printArea = `A1:G${r}`;
   const buf = await wb.xlsx.writeBuffer();
   return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), M };
+}
+
+// 엘에스켐 양식: 받은 MSDS 파일(P20250919-2)을 틀로 그대로 쓰고 칸 값만 바꿈(칸 너비·병합·글꼴·머리말 로고·바닥글 그대로)
+async function buildMsdsLs(inp, company) {
+  await loadScript('jszip'); const T = await templates(); if (!T.msdsLs) throw new Error('엘에스켐 MSDS 양식이 없습니다. 앱을 업데이트하세요.');
+  const M = msdsContent(inp, company), B = msdsBits(M), zip = await JSZip.loadAsync(b64ToBytes(T.msdsLs));
+  const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', P = 'xl/worksheets/sheet1.xml';
+  const doc = new DOMParser().parseFromString(await zip.file(P).async('string'), 'application/xml'), sd = doc.getElementsByTagName('sheetData')[0];
+  const rowEl = n => [...sd.getElementsByTagName('row')].find(x => +x.getAttribute('r') === n);
+  const colN = c => c.charCodeAt(0) - 64;
+  // 성분 줄이 3개 이상이면 33번 줄을 복사해 아래 줄을 밀어냄
+  const extra = Math.max(0, M.s3.length - 2);
+  if (extra) {
+    const shift = ref => ref.replace(/([A-Z]+)(\d+)/g, (m, c, n) => +n >= 34 ? c + (+n + extra) : m);
+    [...sd.getElementsByTagName('row')].reverse().forEach(rw => { const n = +rw.getAttribute('r'); if (n >= 34) { rw.setAttribute('r', n + extra); [...rw.getElementsByTagName('c')].forEach(c => c.setAttribute('r', shift(c.getAttribute('r')))); } });
+    [...doc.getElementsByTagName('mergeCell')].forEach(m => m.setAttribute('ref', shift(m.getAttribute('ref'))));
+    const dim = doc.getElementsByTagName('dimension')[0]; if (dim) dim.setAttribute('ref', shift(dim.getAttribute('ref')));
+    const base = rowEl(33);
+    for (let i = extra; i >= 1; i--) { const cp = base.cloneNode(true); cp.setAttribute('r', 33 + i); [...cp.getElementsByTagName('c')].forEach(c => c.setAttribute('r', c.getAttribute('r').replace(/\d+/, 33 + i))); base.parentNode.insertBefore(cp, base.nextSibling); }
+    const wbx = await zip.file('xl/workbook.xml').async('string'); zip.file('xl/workbook.xml', wbx.replace(/\$D\$(\d+)/, (m, n) => '\x24D\x24' + (+n + extra)));
+  }
+  const R = n => n >= 34 ? n + extra : n; // 원래 양식 줄 번호 → 실제 줄 번호
+  const set = (ref, text) => {
+    const m = ref.match(/([A-Z]+)(\d+)/), n = R(+m[2]), addr = m[1] + n, rw = rowEl(n);
+    let c = [...rw.getElementsByTagName('c')].find(x => x.getAttribute('r') === addr);
+    if (!c) { c = doc.createElementNS(NS, 'c'); c.setAttribute('r', addr); const after = [...rw.getElementsByTagName('c')].find(x => colN(x.getAttribute('r')) > colN(m[1])); rw.insertBefore(c, after || null); }
+    while (c.firstChild) c.removeChild(c.firstChild);
+    const v = text == null ? '' : String(text);
+    if (/^-?\d+(\.\d+)?$/.test(v)) { c.removeAttribute('t'); const e = doc.createElementNS(NS, 'v'); e.textContent = v; c.appendChild(e); return; }
+    c.setAttribute('t', 'inlineStr'); const is = doc.createElementNS(NS, 'is'), t = doc.createElementNS(NS, 't'); t.setAttribute('xml:space', 'preserve'); t.textContent = v; is.appendChild(t); c.appendChild(is);
+  };
+  const W = 74; // B:D 합친 칸 너비(글자)
+  const fit = (n, text, w = W, min = 15) => { const rw = rowEl(R(n)); rw.setAttribute('ht', Math.max(min, 11 * nLines(text, w) + 4).toFixed(1)); rw.setAttribute('customHeight', '1'); };
+  const sv = (n, text, min) => { const v = text === '' || text == null ? '자료없음' : text; set('B' + n, v); fit(n, v, W, min); };
+  set('A4', inp.제품명);
+  sv(8, M.s1.제품명); sv(10, M.s1.권고용도); sv(11, M.s1.사용제한); sv(13, M.s1.회사명); sv(14, M.s1.주소); sv(15, M.s1.긴급전화);
+  sv(18, M.s2.분류); set('B20', ''); sv(21, M.s2.신호어); sv(22, M.s2.H);
+  sv(24, M.s2.P.예방); sv(25, M.s2.P.대응); sv(26, M.s2.P.저장); sv(27, M.s2.P.폐기);
+  rowEl(20).setAttribute('ht', M.s2.그림문자.length ? '49.1' : '15');
+  // 3. 구성성분
+  const rowsC = M.s3.length ? M.s3 : [['', '', '', '']];
+  for (let i = 0; i < Math.max(2, rowsC.length); i++) { const n = 32 + i, rr = rowsC[i] || ['', '', '', ''], rw = rowEl(n);
+    ['A', 'B', 'C', 'D'].forEach((c, k) => { const addr = c + n, ce = [...rw.getElementsByTagName('c')].find(x => x.getAttribute('r') === addr); while (ce && ce.firstChild) ce.removeChild(ce.firstChild); if (ce) ce.removeAttribute('t');
+      if (rr[k] !== '' && rr[k] != null) { ce.setAttribute('t', 'inlineStr'); const is = doc.createElementNS(NS, 'is'), t = doc.createElementNS(NS, 't'); t.setAttribute('xml:space', 'preserve'); t.textContent = String(rr[k]); is.appendChild(t); ce.appendChild(is); } });
+    rw.setAttribute('ht', Math.max(19.9, 12.6 * Math.max(nLines(rr[0], 30), nLines(rr[1], 43)) + 6).toFixed(1)); }
+  sv(37, M.s4.눈); sv(38, M.s4.피부); sv(39, M.s4.흡입); sv(40, M.s4.먹었을때); sv(41, '- ' + cut(M.s4.기타));
+  set('B45', M.s5.소화제 + '\n' + M.s5.보호구); rowEl(R(45)).setAttribute('ht', Math.max(15, 12.6 * nLines(M.s5.소화제 + '\n' + M.s5.보호구, W) / 2 + 2).toFixed(1)); rowEl(R(46)).setAttribute('ht', rowEl(R(45)).getAttribute('ht'));
+  sv(48, M.s5.유해성); sv(50, M.s5.보호구); sv(54, M.s6.인체); sv(56, M.s6.환경); sv(58, M.s6.정화); sv(61, M.s7.취급); sv(62, M.s7.저장);
+  const twa = B.per(s => s.twa && s.twa !== '해당없음' ? (/^TWA|^STEL/.test(s.twa) ? s.twa : 'TWA ' + s.twa) : '해당없음');
+  sv(67, twa); sv(69, '자료없음'); sv(71, '해당없음'); sv(73, '자료없음'); sv(74, M.s8.공학); sv(75, '운전시 먼지, 흄 또는 미스트를 발생하는 경우, 공기 오염이 노출기준 이하로 유지되도록 환기하시오');
+  sv(77, '- ' + M.s8.호흡); sv(78, '- 작업장 가까운 곳에 세안설비와 비상세척설비(샤워식)를 설치하시오.\n- ' + M.s8.눈); sv(79, '- ' + M.s8.손); sv(80, '- ' + M.s8.신체);
+  const s9 = Object.fromEntries(M.s9);
+  sv(84, s9['성상']); sv(85, s9['색상']); sv(86, s9['냄새']); sv(87, s9['냄새역치']); sv(88, s9['pH']); sv(89, s9['녹는점/어는점']); sv(90, s9['초기 끓는점과 끓는점 범위']); sv(91, s9['인화점']); sv(92, s9['증발속도']); sv(93, s9['인화성(고체, 기체)']);
+  sv(94, M.s9ul.상한 === '자료없음' ? '자료없음' : `상한-${M.s9ul.상한}, 하한-${M.s9ul.하한}`); sv(95, s9['증기압']); sv(96, s9['용해도']); sv(97, s9['증기밀도']); sv(98, s9['비중']); sv(99, s9['n-옥탄올/물 분배계수']); sv(100, s9['자연발화온도']); sv(101, s9['분해온도']); sv(102, s9['점도']); sv(103, s9['분자량']);
+  sv(106, M.s10.안정성); sv(107, M.s10.조건); sv(108, M.s10.물질); sv(109, M.s10.분해물);
+  sv(113, B.호흡기); sv(114, B.경구); sv(115, B.눈피부);
+  sv(118, B.per(s => s.ld50 ? `경구 LD50 ${s.ld50}` : '')); sv(119, B.per(s => (s.cls || {}).ateDerm ? `경피 ATE ${s.cls.ateDerm} mg/kg` : '')); sv(120, B.per(() => ''));
+  sv(121, M.s11.피부); sv(122, M.s11.눈); sv(123, '자료없음'); sv(124, M.s11.과민성); sv(125, M.s11.발암성); [126, 127, 128, 129, 130, 131, 132].forEach(n => sv(n, '자료없음'));
+  sv(133, M.s11.변이원성); sv(134, M.s11.생식독성); sv(135, M.s11.se); sv(136, M.s11.re); sv(137, M.s11.흡인); sv(138, '자료없음');
+  set('B141', M.s12.생태독성 === '자료없음' ? '' : M.s12.생태독성); fit(141, M.s12.생태독성 === '자료없음' ? '' : M.s12.생태독성);
+  [142, 143, 144, 146, 147, 149, 150, 151, 152].forEach(n => sv(n, '자료없음'));
+  sv(155, M.s13.방법); sv(156, M.s13.주의);
+  sv(159, M.s14.un); sv(160, M.s14.name); sv(161, M.s14.cls); sv(162, M.s14.pg); sv(163, M.s14.marine);
+  const ems = String(M.s14.ems || ''), em = ems.match(/(F-\w)\s*,\s*(S-\w)/); sv(165, em ? em[1] : '해당없음'); sv(166, em ? em[2] : '해당없음');
+  sv(169, M.s15.산안법); sv(170, M.s15.화관법); sv(171, M.s15.위험물); sv(172, M.s15.폐기물); sv(175, '화학물질의 등록 및 평가 등에 관한 법률\n' + M.s15.화평법);
+  [177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187].forEach(n => sv(n, '해당없음'));
+  sv(190, M.s16.출처); set('D191', dotYmd(M.s16.최초)); set('D193', String(M.s16.개정 || 0)); set('D194', M.s16.개정 > 0 ? dotYmd(M.s16.최종) : '-');
+  zip.file(P, new XMLSerializer().serializeToString(doc));
+  // 그림문자(2번 칸 B20)
+  const pics = M.s2.그림문자; let dr = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">', rel = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+  pics.forEach((g, i) => { const x = 69272 + i * 577595, sz = 540000;
+    dr += `<xdr:oneCellAnchor><xdr:from><xdr:col>1</xdr:col><xdr:colOff>${x}</xdr:colOff><xdr:row>19</xdr:row><xdr:rowOff>51954</xdr:rowOff></xdr:from><xdr:ext cx="${sz}" cy="${sz}"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${i + 2}" name="${g}"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rIdG${i}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${sz}" cy="${sz}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>`;
+    rel += `<Relationship Id="rIdG${i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${g}.png"/>`;
+    zip.file(`xl/media/${g}.png`, b64ToBytes(T.ghs[g])); });
+  zip.file('xl/drawings/drawing1.xml', dr + '</xdr:wsDr>'); zip.file('xl/drawings/_rels/drawing1.xml.rels', rel + '</Relationships>');
+  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
+  return { blob, M };
 }
 
 // ---------- 단량체 정보 ----------
@@ -511,5 +646,5 @@ async function readNotice(file) {
   };
 }
 
-window.Docs = { setDict, compData, findComp, toComps, BASE_COMPS, templates, buildRnd, buildIdPng, deliver, blobToB64, SOLV, SOLV_ORDER, classify, msdsContent, buildMsdsXlsx, buildMonomerXlsx, buildSelfCheck, buildCasCert, readNotice, download, safeName, ymd, loadScript };
+window.Docs = { hOf, setDict, compData, findComp, toComps, BASE_COMPS, templates, buildRnd, buildIdPng, deliver, blobToB64, SOLV, SOLV_ORDER, classify, msdsContent, buildMsdsXlsx, buildMonomerXlsx, buildSelfCheck, buildCasCert, readNotice, download, safeName, ymd, loadScript };
 })();

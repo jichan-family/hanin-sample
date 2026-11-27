@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<!-- 한인정밀화학 샘플 관리 — Index.html · 버전 v0.5.6 · 최종 수정 2026-11-27 · 최초 제작 2026-11-25 -->
+<html lang="ko">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root { --ink:#17212b; --sub:#5b6773; --mute:#8a96a3; --line:#dfe4ea; --bg:#f2f4f7; --card:#fff; --nav:#14304d; --nav2:#1d4168;
+    --accent:#1260b4; --accent-l:#e6f0fb; --hanin:#1f6feb; --ls:#1a7f37; --jy:#c4520a; --cw:#6e7781;
+    --ok:#1a7f37; --ok-l:#e3f4e7; --warn:#9a6700; --warn-l:#fff4d1; --bad:#c9252d; --bad-l:#fdecec;
+    /* 디자인 기준(v0.5.5): 높이 3단계, 둥글기 2가지, 테두리 1가지 */
+    --h:36px; --h-sm:30px; --h-lg:40px; --rc:8px; --r:12px; --bd:#d5dce3; --div:#eef1f4; --panel:#f7f9fb; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:var(--ink); background:var(--bg); font-size:14px; }
+  button { font:inherit; cursor:pointer; border:1px solid var(--bd); background:#fff; border-radius:var(--rc); height:var(--h); padding:0 14px; color:var(--ink);
+    display:inline-flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap; line-height:1; }
+  button:hover { border-color:#b9c3ce; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  button.primary:hover { background:#0e4f95; }
+  button.ghost { border-color:transparent; background:none; color:var(--sub); }
+  button.danger { color:var(--bad); }
+  button:disabled { opacity:.45; cursor:default; }
+  button.sm { height:var(--h-sm); padding:0 11px; font-size:13px; }
+  button.lg { height:var(--h-lg); padding:0 18px; }
+  input, select, textarea { font:inherit; color:var(--ink); }
+  .in, .f input:not([type=checkbox]):not([type=radio]):not([type=file]), .f select, .tbl input, .xdbar select, .xdbar input, .upkv input, .mrow input, .srow .pct input, .dsm, .num {
+    width:100%; height:var(--h); padding:0 11px; border:1px solid var(--bd); border-radius:var(--rc); background:#fff; font-size:14px; }
+  .xdbar select, .xdbar input, .num { width:auto; }
+  .in:focus, .f input:focus, .f select:focus, textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-l); }
+  textarea { width:100%; font-family:Consolas,monospace; font-size:12px; border:1px solid var(--bd); border-radius:var(--rc); padding:8px; }
+  .hint { color:var(--mute); font-size:13px; }
+
+  /* 레이아웃 */
+  #app { display:flex; min-height:100vh; }
+  #side { width:216px; flex:none; background:var(--nav); color:#dce6f1; display:flex; flex-direction:column; position:sticky; top:0; height:100vh; }
+  .brand { padding:20px 18px 16px; border-bottom:1px solid rgba(255,255,255,.08); }
+  .brand b { display:block; color:#fff; font-size:16px; letter-spacing:-.2px; }
+  .brand span { font-size:12px; color:#9fb3c8; }
+  .nav { display:flex; align-items:center; gap:10px; width:calc(100% - 16px); margin:2px 8px; padding:10px 12px; border:0; border-radius:var(--rc); background:none; color:#c9d6e3; text-align:left; font-size:14px; }
+  .nav svg { width:18px; height:18px; flex:none; }
+  .nav:hover { background:rgba(255,255,255,.07); color:#fff; }
+  .nav.on { background:#fff; color:var(--nav); font-weight:700; }
+  .navgap { height:10px; }
+  .sidefoot { margin-top:auto; padding:12px 8px 14px; border-top:1px solid rgba(255,255,255,.08); display:flex; flex-direction:column; gap:6px; }
+  .sidefoot .primary { margin:0 8px; background:#2f80d8; border-color:#2f80d8; }
+  #lockBtn { margin:0 8px; background:rgba(255,255,255,.08); border-color:transparent; color:#dce6f1; }
+  #foot { font-size:12px; color:#7f95ab; padding:2px 10px; line-height:1.5; }
+  #main { flex:1; min-width:0; }
+  .top { position:sticky; top:0; z-index:5; background:var(--bg); padding:18px 26px 0; }
+  .ttl { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .ttl h1 { font-size:20px; margin:0; flex:1; letter-spacing:-.3px; }
+  .page { padding:0 26px 40px; }
+  .tplwarn { margin:0 26px 12px; }
+
+  /* 목록 필터 */
+  .tabs { display:flex; gap:2px; border-bottom:1px solid var(--line); }
+  .tab { border:0; border-bottom:3px solid transparent; border-radius:0; background:none; padding:9px 14px; color:var(--sub); font-size:14px; }
+  .tab.on { border-bottom-color:var(--accent); color:var(--ink); font-weight:700; }
+  .tab .n { font-size:12px; color:var(--mute); margin-left:3px; }
+  .bar { display:flex; gap:8px; padding:12px 0; align-items:center; flex-wrap:wrap; }
+  .chips { display:flex; gap:6px; }
+  .chip { height:var(--h-sm); padding:0 12px; font-size:13px; background:#fff; color:var(--sub); }
+  .chip.on { background:var(--accent-l); border-color:var(--accent); color:var(--accent); font-weight:700; }
+  .chip .n { opacity:.7; margin-left:3px; font-size:12px; }
+  .bar .search { flex:1; min-width:240px; }
+  #structPanel { display:none; background:#fff; border:1px solid var(--line); border-radius:var(--r); padding:14px; margin-bottom:12px; }
+  #structPanel.open { display:block; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  #status { color:var(--sub); font-size:13px; padding:2px 0 8px; }
+
+  /* 카드 */
+  #grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px; }
+  .card { position:relative; background:var(--card); border-radius:var(--r); overflow:hidden; cursor:pointer; display:flex; flex-direction:column;
+    box-shadow:0 1px 2px rgba(16,32,48,.06), 0 2px 8px rgba(16,32,48,.05); border:1px solid var(--line); transition:box-shadow .15s, transform .15s; }
+  .card:hover { box-shadow:0 4px 16px rgba(16,32,48,.12); transform:translateY(-1px); }
+  .struct { position:relative; height:170px; display:flex; align-items:center; justify-content:center; background:#fff; border-bottom:1px solid #eef1f4; padding:6px; }
+  .struct svg { max-width:100%; max-height:100%; }
+  .stbadge { position:absolute; top:8px; left:8px; z-index:1; }
+  .olddot { position:absolute; top:10px; right:10px; width:8px; height:8px; border-radius:50%; background:#c4cbd3; }
+  .monos { display:flex; align-items:center; justify-content:center; gap:2px; width:100%; height:100%; }
+  .monos .m { flex:1; min-width:0; height:100%; display:flex; align-items:center; justify-content:center; flex-direction:column; }
+  .monos .m svg { max-height:120px; }
+  .monos .m small { font-size:12px; color:var(--sub); }
+  .monos .m.mod { border:1.5px dashed #e3a44a; border-radius:var(--rc); }
+  .monos .plus { color:var(--mute); font-weight:700; }
+  .nostruct { color:var(--mute); font-size:13px; text-align:center; line-height:1.6; }
+  .body { padding:11px 14px 13px; display:flex; flex-direction:column; gap:4px; flex:1; }
+  .no { display:inline-flex; align-items:center; height:22px; font-family:inherit; font-variant-numeric:tabular-nums; font-size:13px; font-weight:700; padding:0 8px; border-radius:6px; background:#eef2f6; color:var(--sub); align-self:center; white-space:nowrap; line-height:1; }
+  .no.한인 { background:#e6efff; color:var(--hanin); } .no.엘에스켐 { background:#e3f4e7; color:var(--ls); } .no.제이와이트리켐 { background:#fdeee3; color:var(--jy); } .no.케미웍스 { background:#eef0f2; color:var(--cw); }
+  .name { font-weight:700; font-size:16px; word-break:break-all; letter-spacing:-.2px; }
+  .chem { color:var(--sub); font-size:12px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; word-break:break-all; }
+  .meta { font-size:12px; color:var(--mute); }
+  .badges { display:flex; gap:4px; flex-wrap:wrap; margin-top:auto; padding-top:4px; }
+  .b { font-size:12px; padding:2px 8px; border-radius:var(--rc); border:1px solid; white-space:nowrap; background:#fff; font-weight:600; }
+  .b.한인 { color:var(--hanin); border-color:#9cbcf5; } .b.엘에스켐 { color:var(--ls); border-color:#8fcca0; } .b.제이와이트리켐 { color:var(--jy); border-color:#f0b48d; } .b.케미웍스 { color:var(--cw); border-color:#c2c8ce; }
+  .b.etc, .b.미출고 { color:var(--mute); border-color:var(--line); font-weight:400; }
+  .b.ok { color:var(--ok); border-color:#9ad3a8; background:var(--ok-l); }
+  .b.wait { color:var(--warn); border-color:#e8c766; background:var(--warn-l); }
+  .b.bad { color:var(--bad); border-color:#f2a3a6; background:var(--bad-l); }
+  .b.info { color:var(--accent); border-color:#a9c8ec; background:var(--accent-l); }
+  .b.score { color:#fff; background:var(--accent); border-color:var(--accent); }
+  .b.big { font-size:13px; padding:3px 11px; }
+
+  /* 창 */
+  .modal { position:fixed; inset:0; background:rgba(15,25,38,.45); display:none; align-items:flex-start; justify-content:center; z-index:20; overflow:auto; padding:32px 14px; }
+  .modal.open { display:flex; }
+  .sheet { background:#fff; border-radius:var(--r); width:100%; max-width:860px; box-shadow:0 20px 50px rgba(0,0,0,.25); }
+  .sh { display:flex; align-items:center; gap:10px; padding:18px 22px 14px; border-bottom:1px solid #eef1f4; }
+  .sh h2 { font-size:20px; margin:0; flex:1; display:flex; align-items:center; gap:8px; flex-wrap:wrap; letter-spacing:-.3px; }
+  .sh .x { margin-left:6px; }
+  .sh .x:hover { background:var(--panel); }
+  .unit { position:relative; } .unit input { padding-right:46px !important; text-align:right; } .unit span { position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--sub); font-size:13px; pointer-events:none; }
+  .sb { padding:16px 22px; }
+  .sf { display:flex; gap:8px; justify-content:flex-end; align-items:center; padding:14px 22px; border-top:1px solid #eef1f4; background:#fafbfc; border-radius:0 0 var(--r) var(--r); }
+  .sf .sp { flex:1; }
+  .sumline { display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px; color:var(--sub); padding:10px 22px; background:#f7f9fb; border-bottom:1px solid #eef1f4; }
+  .box { border:1px solid var(--line); border-radius:var(--r); padding:14px 16px; margin-bottom:12px; background:#fff; }
+  .box h3 { font-size:14px; margin:0 0 10px; display:flex; align-items:center; gap:8px; }
+  .box h3 .sp { flex:1; }
+  .box .desc { font-size:13px; color:var(--mute); margin:-4px 0 10px; }
+  .f { display:grid; gap:10px 12px; grid-template-columns:repeat(6,1fr); }
+  .f > div { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .f label { font-size:13px; color:#3d4753; font-weight:600; }
+  .f .c1 { grid-column:span 1; } .f .c2 { grid-column:span 2; } .f .c3 { grid-column:span 3; } .f .c4 { grid-column:span 4; } .f .c6 { grid-column:span 6; }
+  .seg { display:flex; flex-wrap:wrap; gap:6px; }
+  .seg label { position:relative; }
+  .seg input { position:absolute; opacity:0; pointer-events:none; }
+  .seg span { display:inline-flex; align-items:center; height:var(--h); padding:0 14px; border:1px solid var(--bd); border-radius:var(--rc); background:#fff; font-size:14px; color:var(--sub); cursor:pointer; user-select:none; }
+  .seg input:checked + span { background:var(--accent-l); border-color:var(--accent); color:var(--accent); font-weight:700; }
+  .seg input:checked + span.한인 { background:#e6efff; border-color:var(--hanin); color:var(--hanin); }
+  .seg input:checked + span.엘에스켐 { background:#e3f4e7; border-color:var(--ls); color:var(--ls); }
+  .seg input:checked + span.제이와이트리켐 { background:#fdeee3; border-color:var(--jy); color:var(--jy); }
+  .seg input:checked + span.케미웍스 { background:#eef0f2; border-color:var(--cw); color:var(--cw); }
+  .msg { font-size:13px; margin-left:4px; }
+  .msg.ok { color:var(--ok); } .msg.bad { color:var(--bad); }
+  .warn { background:var(--warn-l); border:1px solid #ecd27a; border-radius:var(--rc); padding:9px 12px; font-size:13px; margin-top:10px; line-height:1.6; }
+  .warn:empty { display:none; }
+  .warn.err { background:var(--bad-l); border-color:#f2a3a6; }
+  .wl { font-size:13px; color:var(--warn); line-height:1.7; }
+  .wl div::before { content:'⚠ '; }
+  .detailStruct { height:280px; display:flex; justify-content:center; align-items:center; border:1px solid #eef1f4; border-radius:var(--r); margin-bottom:14px; background:#fff; }
+  .detailStruct.small { height:auto; min-height:70px; padding:10px; }
+  .detailStruct .monos .m svg { max-height:220px; }
+  .kv { display:grid; grid-template-columns:72px 1fr; gap:7px 12px; font-size:14px; }
+  .kv > div:nth-child(odd) { color:var(--sub); }
+  .tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .tbl th, .tbl td { border-bottom:1px solid #eef1f4; padding:7px 8px; text-align:left; vertical-align:middle; }
+  .tbl th { color:var(--mute); font-weight:600; font-size:13px; }
+  .empty { color:var(--mute); font-size:13px; padding:4px 0; }
+  .edit-only, .edit-cell { display:none !important; }
+  body.editing .edit-only { display:inline-block !important; }
+  body.editing button.nav.edit-only { display:flex !important; }
+  body.editing div.edit-only, body.editing section.edit-only { display:block !important; }
+  body.editing .edit-cell { display:table-cell !important; }
+
+  /* 편집기 */
+  .editorBox { width:100%; }
+  .me-host { display:flex; border:1px solid var(--line); border-radius:var(--r); overflow:hidden; height:560px; background:#fff; }
+  .me-side { width:164px; flex:none; background:#f6f8fa; border-right:1px solid var(--line); padding:10px 8px; display:flex; flex-direction:column; gap:9px; overflow-y:auto; }
+  .me-grp { display:grid; grid-template-columns:repeat(3,44px); gap:5px; }
+  .me-btn { width:44px; height:40px; display:flex; align-items:center; justify-content:center; padding:0; border:1px solid var(--bd); border-radius:var(--rc); background:#fff; color:var(--ink); }
+  .me-btn:hover { border-color:var(--accent); }
+  .me-btn svg { width:24px; height:24px; }
+  .me-btn.on { background:var(--accent-l); border-color:var(--accent); color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+  .me-els .me-btn { font-size:16px; }
+  .me-clear { width:142px; font-size:13px; font-weight:600; }
+  .me-main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .me-tpls { display:flex; gap:6px; flex-wrap:wrap; align-items:center; padding:8px 10px; border-bottom:1px solid var(--line); }
+  .me-tlabel { font-size:13px; color:var(--sub); margin-right:2px; }
+  .me-tpl { height:var(--h-sm); padding:0 11px; font-size:13px; }
+  .me-tpl.on { background:var(--accent-l); border-color:var(--accent); color:var(--accent); font-weight:700; }
+  .me-svg { flex:1; width:100%; min-height:0; outline:none; cursor:crosshair; touch-action:none; font-family:Arial,sans-serif; }
+  .me-help { padding:7px 12px; font-size:13px; color:var(--sub); border-top:1px solid var(--line); background:#fff; }
+  .me-warn { padding:0 12px 6px; font-size:13px; color:var(--bad); background:#fff; }
+  .me-warn:empty { display:none; }
+  .small-ed .me-host { height:440px; }
+
+  .ion, .pc { font-size:13px; background:#f7f9fb; border:1px solid var(--line); border-radius:var(--rc); padding:8px 12px; margin-top:8px; line-height:1.75; }
+  .ion:empty, .pc:empty { display:none; }
+  .mrow { display:grid; grid-template-columns:86px 120px 1fr 130px auto; gap:8px; align-items:center; margin-bottom:8px; }
+  .mrow .thumb { width:86px; height:58px; border:1px solid var(--bd); border-radius:var(--rc); display:flex; align-items:center; justify-content:center; cursor:pointer; background:#fff; font-size:12px; color:var(--mute); overflow:hidden; }
+  .mrow .thumb:hover { border-color:var(--accent); color:var(--accent); }
+  .mrow .thumb svg { max-width:100%; max-height:100%; }
+
+  /* 서류 */
+  .doccard { border:1px solid var(--line); border-radius:var(--r); padding:14px 16px; margin-bottom:12px; }
+  .doccard h3 { margin:0 0 4px; font-size:16px; display:flex; align-items:center; gap:8px; }
+  .doccard .desc { font-size:13px; color:var(--mute); margin-bottom:10px; }
+  .doccard .act { display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .doccard.done { background:#f6fbf7; border-color:#bfe3c8; }
+  .blocked { font-size:13px; color:var(--bad); }
+  .linkbtn { border:0; background:none; color:var(--accent); padding:0; text-decoration:underline; font-size:13px; }
+
+  /* MSDS */
+  .back { display:inline-flex; align-items:center; gap:4px; }
+  .msdsGrid { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(320px,1fr); gap:18px; align-items:start; }
+  .prev { position:sticky; top:64px; } /* 위 제목줄 높이만큼만 — 처음엔 왼쪽 상자와 위쪽이 맞게 */
+  .solvbtns { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .solvbtns button { height:var(--h-sm); padding:0 11px; font-size:13px; }
+  .solvbtns button:disabled { opacity:.35; }
+  .srow { display:grid; grid-template-columns:1fr 110px auto; gap:8px; align-items:center; padding:8px 10px; border:1px solid #eef1f4; border-radius:var(--rc); margin-bottom:6px; background:#fafbfc; }
+  .srow b { font-size:14px; } .srow small { color:var(--mute); font-size:12px; display:block; }
+  .srow .pct { display:flex; align-items:center; gap:4px; }
+  .srow .pct input { text-align:right; width:80px; }
+  .sumbar { height:8px; border-radius:4px; background:#eef1f4; overflow:hidden; margin:8px 0 4px; display:flex; }
+  .sumbar i { display:block; height:100%; }
+  .sumtxt { font-size:13px; }
+  .pics { display:flex; gap:6px; margin:4px 0; }
+  .pics img { width:54px; height:54px; }
+  .settabs { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid var(--line); }
+  .dirty { color:var(--warn); font-size:13px; }
+  .need input { border-color:#e8c766 !important; background:#fffbea !important; }
+  .f small.use { font-size:12px; color:var(--mute); font-weight:400; }
+  @media (max-width:980px) {
+    #side { width:64px; } .brand span, .brand b, .nav .t, #foot, .sidefoot .t { display:none; }
+    .nav { justify-content:center; padding:10px 0; } .msdsGrid { grid-template-columns:1fr; } .prev { position:static; }
+    .f { grid-template-columns:repeat(2,1fr); } .f .c3, .f .c4, .f .c6 { grid-column:span 2; } .f .c1 { grid-column:span 1; }
+  }
+
+  /* v0.5.0 */
+  .b.co { color:var(--c); border-color:var(--c); }
+  .no.co { background:color-mix(in srgb, var(--c) 12%, white); color:var(--c); }
+  .seg input:checked + span.co { background:color-mix(in srgb, var(--c) 12%, white); border-color:var(--c); color:var(--c); }
+  .cardhead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .cardhead .name { line-height:22px; }
+  .cardhead .name { flex:1; min-width:0; }
+  .cas { font-size:12px; color:var(--sub); font-variant-numeric:tabular-nums; }
+  .dash { color:var(--mute); }
+  .dtabs { display:flex; gap:2px; padding:0 22px; border-bottom:1px solid #eef1f4; background:#fff; }
+  .dgrid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:18px; align-items:start; }
+  .dgrid .detailStruct { margin-bottom:0; height:300px; }
+  .kv2 { display:grid; grid-template-columns:72px 1fr 72px 1fr; gap:8px 10px; font-size:14px; align-items:baseline; }
+  .kv2 > .k { color:var(--sub); font-size:13px; }
+  .kv2 > .full { grid-column:2 / -1; word-break:break-all; }
+  .meta-foot { font-size:12px; color:var(--mute); margin-top:12px; }
+  .exrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:9px 0; border-bottom:1px solid #eef1f4; font-size:13px; }
+  .exrow:last-child { border-bottom:0; }
+  .exrow b { min-width:84px; }
+  .docbtns { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+  .docbtns .lbl { font-size:13px; color:var(--sub); margin-right:2px; }
+  .docbtns button { height:var(--h-sm); padding:0 11px; font-size:13px; }
+  .docbtns button.off { opacity:.45; }
+  .scard { border:1px solid var(--line); border-radius:var(--r); padding:12px 14px; margin-bottom:10px; }
+  .scard .shead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:14px; }
+  .scard .shead .sp { flex:1; }
+  .scard .line { font-size:13px; color:var(--sub); margin-top:6px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .formbox, .formpanel { border:1px solid var(--div); border-radius:var(--rc); padding:12px; background:var(--panel); }
+  .formpanel { margin:10px 0 4px; }
+  .pgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:12px; }
+  .pcard { background:#fff; border:1px solid var(--line); border-radius:var(--r); padding:14px 16px; cursor:pointer; box-shadow:0 1px 2px rgba(16,32,48,.05); display:flex; flex-direction:column; gap:6px; }
+  .pcard:hover { box-shadow:0 4px 14px rgba(16,32,48,.1); }
+  .pcard h4 { margin:0; font-size:16px; display:flex; align-items:center; gap:6px; }
+  .pcard .sub { font-size:13px; color:var(--mute); }
+  .miss { font-size:12px; color:var(--warn); background:var(--warn-l); border:1px solid #ecd27a; border-radius:var(--rc); padding:1px 7px; }
+  .stampbox { width:90px; height:90px; border:1px solid var(--bd); border-radius:var(--rc); display:flex; align-items:center; justify-content:center; background:#fff; }
+  .stampbox img { max-width:84px; max-height:84px; }
+  .chk { display:flex; gap:10px; flex-wrap:wrap; font-size:14px; }
+  .chk label { display:flex; gap:4px; align-items:center; cursor:pointer; }
+  textarea.plain { font-family:inherit; font-size:13px; min-height:90px; }
+  @media (max-width:980px) { .dgrid { grid-template-columns:1fr; } .kv2 { grid-template-columns:70px 1fr; } .kv2 > .full { grid-column:2; } }
+
+  /* v0.5.1 */
+  .sh h2 .no { font-size:13px; height:24px; align-self:center; }
+  .sh h2 .dn { line-height:1.2; }
+  .tdot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-left:5px; vertical-align:middle; }
+  .exrow .exno { color:var(--mute); width:18px; text-align:right; font-variant-numeric:tabular-nums; }
+  .exrow .exdate { color:var(--sub); font-variant-numeric:tabular-nums; }
+  .exrow .exinst { color:var(--mute); font-size:13px; }
+  @media (max-width: 760px) { .exrow .exinst, .exrow .exst { display:none; } }
+  #exRecBox.drop { outline:2px dashed var(--accent); outline-offset:-4px; }
+  .shsums { margin-top:14px; border-top:1px solid #eef1f4; padding-top:10px; }
+  .shsums h4 { margin:0 0 6px; font-size:13px; color:var(--mute); font-weight:600; }
+  .shsum { display:flex; gap:10px; align-items:center; padding:7px 8px; border-radius:var(--rc); font-size:14px; cursor:pointer; }
+  .shsum:hover { background:#f4f7fa; }
+  .shsum .d { color:var(--mute); font-variant-numeric:tabular-nums; min-width:84px; }
+  .shsum .sp { flex:1; }
+  .modal .sheet { max-width:min(100%, var(--mw, 980px)); min-width:0; }
+  .sheet.w-s { --mw:440px; } .sheet.w-m { --mw:760px; } .sheet.w-l { --mw:980px; }
+  .modal .sheet * { min-width:0; }
+  .modal .sf { position:sticky; bottom:0; z-index:2; }
+  .bulk textarea { width:100%; min-height:140px; font-family:ui-monospace,Consolas,monospace; font-size:13px; border:1px solid var(--bd); border-radius:var(--rc); padding:8px; box-sizing:border-box; }
+  .bulk table { width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; }
+  .bulk td, .bulk th { border-bottom:1px solid #eef1f4; padding:6px; text-align:left; vertical-align:top; }
+  .bulk td.svg svg { display:block; }
+  .upkv { display:grid; grid-template-columns:72px 1fr; gap:10px 12px; font-size:14px; align-items:center; }
+  .upkv > .k { color:var(--sub); font-size:13px; }
+  a.abtn { display:inline-block; background:var(--accent); color:#fff; font-weight:600; border-radius:var(--rc); padding:7px 14px; text-decoration:none; }
+  .nav.hasnew .t::after { content:''; display:inline-block; width:7px; height:7px; border-radius:50%; background:#e5534b; margin-left:6px; vertical-align:middle; }
+  .kv1 { display:grid; grid-template-columns:72px 1fr; gap:9px 12px; font-size:14px; align-content:start; }
+  .kv1 > .k { color:var(--sub); font-size:13px; padding-top:1px; }
+  .kv1 > div:not(.k) { word-break:break-word; }
+  .docrow { display:flex; align-items:center; gap:8px; padding:8px 0; border-top:1px solid #eef1f4; font-size:14px; flex-wrap:wrap; }
+  .docrow:first-child { border-top:0; }
+  .docrow .sp { flex:1; }
+  .docrow.off b { color:var(--mute); }
+  .wmini { font-size:12px; color:var(--warn); }
+  .selfed { padding:6px 0 10px; }
+  .scdocs { margin-top:8px; border-top:1px solid #eef1f4; }
+  .xdbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px; font-size:13px; color:var(--sub); }
+
+  /* v0.5.5 */
+  .sechead { display:flex; align-items:center; gap:8px; margin:0 0 6px; }
+  .sechead h4 { margin:0; font-size:14px; color:var(--ink); font-weight:700; }
+  .sechead .sp { flex:1; }
+  .shsum .q { color:var(--sub); }
+  .emptybox { background:var(--panel); border:1px solid var(--div); border-radius:var(--rc); padding:14px 16px; color:var(--sub); font-size:13px; line-height:1.6; }
+  .docrow.off { opacity:.6; }
+  .docs { margin-top:12px; border-top:1px solid var(--div); }
+  .docs .docrow { padding:10px 0; min-height:52px; }
+  .docs .docrow:first-child { border-top:0; }
+  .docrow > b { min-width:150px; font-size:14px; }
+  .docrow button.sm { min-width:64px; }
+  .docrow .dst { font-size:12px; }
+  .cpy { display:flex; gap:6px; } .cpy input { flex:1; min-width:0; } .cpy button { flex:none; height:var(--h); min-width:64px; }
+  .lh { font-weight:400; color:var(--mute); font-size:12px; margin-left:4px; }
+  .f > .fend { flex-direction:row; align-items:flex-end; gap:8px; }
+  .exrow .acts { display:flex; gap:6px; align-items:center; }
+  .exrow .acts .file { cursor:pointer; }
+  #monoTbl tr.newrow td { background:#f6f9ff; }
+  #dictTbl td:nth-child(2) { white-space:nowrap; }
+  #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:60; display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none; }
+  .tmsg { background:#17212b; color:#fff; padding:11px 18px; border-radius:var(--rc); font-size:14px; box-shadow:0 8px 24px rgba(0,0,0,.25); transition:opacity .4s, transform .4s; }
+  .tmsg.bad { background:var(--bad); }
+  .tmsg.out { opacity:0; transform:translateY(8px); }
+  .nav, .tab, .linkbtn { height:auto; }
+  .mixsum { font-size:13px; color:var(--sub); padding:0 12px; line-height:1.6; }
+  .mixsum b { color:var(--ink); }
+  /* 성분 표 */
+  .ctbl { width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed; }
+  .ctbl th:nth-child(1) { width:auto; }
+  .ctbl th { color:var(--sub); font-weight:600; font-size:13px; text-align:left; padding:4px 4px 6px; }
+  .ctbl td { padding:3px 4px; vertical-align:middle; }
+  .ctbl input { width:100%; height:var(--h-sm); padding:0 8px; border:1px solid var(--bd); border-radius:6px; font-size:13px; }
+  .ctbl tr.bad input { border-color:var(--bad); background:var(--bad-l); }
+  .ctst { white-space:nowrap; } .ctst .b { margin-right:4px; }
+  .ctbl button.ghost { color:var(--mute); font-size:18px; }
+  .msdsGrid > .prev { margin-top:0; } .prev > .box { margin-top:0; }
+  /* 목록 탭: 크게, 회사 색 */
+  #tabs { gap:6px; border-bottom:0; padding-bottom:4px; flex-wrap:wrap; }
+  #tabs .tab { height:var(--h-lg); padding:0 18px; font-size:16px; border:1px solid var(--bd); border-radius:var(--rc); background:#fff; color:var(--sub); border-left:5px solid var(--c, var(--bd)); }
+  #tabs .tab .n { font-size:13px; }
+  #tabs .tab.on { background:var(--c, var(--nav)); border-color:var(--c, var(--nav)); color:#fff; font-weight:700; }
+  #tabs .tab.on .n { color:rgba(255,255,255,.85); }
+  #kinds .chip { height:var(--h); padding:0 16px; font-size:14px; }
+  .structbtn { height:var(--h-lg); padding:0 16px; font-size:15px; }
+  .structbtn.on { background:#0e4f95; }
+  .nav { justify-content:flex-start; }
+  .tab { line-height:1.4; }
+</style>
+</head>
+<body>
+<div id="app">
+<aside id="side">
+  <div class="brand"><b>한인정밀화학</b><span>샘플 관리</span></div>
+  <div class="navgap"></div>
+  <button class="nav on" data-v="list" onclick="navTo('list')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="t">샘플 목록</span></button>
+  <button class="nav" data-v="partners" onclick="navTo('partners')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21V8l9-5 9 5v13"/><path d="M9 21v-6h6v6"/><path d="M3 21h18"/></svg><span class="t">거래처</span></button>
+  <button class="nav edit-only" data-v="msds" onclick="navTo('msds')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6M9 13h8M9 17h8"/></svg><span class="t">MSDS 작성</span></button>
+  <button class="nav edit-only" data-v="settings" onclick="navTo('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg><span class="t">설정</span></button>
+  <div class="sidefoot">
+    <button class="primary edit-only" onclick="openForm()">+ <span class="t">샘플 등록</span></button>
+    <button id="lockBtn" onclick="toggleEdit()">🔒 <span class="t">편집</span></button>
+    <div id="foot"></div>
+  </div>
+</aside>
+
+<main id="main">
+<div id="tplWarn" class="warn err tplwarn" style="display:none"></div>
+
+<section id="view_list">
+  <div class="top">
+    <div class="ttl"><h1>한인정밀화학 샘플 관리</h1></div>
+    <div class="tabs" id="tabs"></div>
+    <div class="bar">
+      <div class="chips" id="kinds"></div>
+      <button class="primary structbtn" id="structBtn" onclick="toggleStruct()" title="ChemDraw에서 Edit → Copy As → SMILES로 복사해 Ctrl+V. 공통 골격만 그리면 더 많이 찾습니다."><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 4v8l-7 4-7-4V7z"/><circle cx="17.5" cy="17.5" r="3.2" fill="#fff" stroke="currentColor"/><path d="M20 20l2.5 2.5"/></svg>구조 검색</button>
+      <input class="in search" type="search" id="q" placeholder="관리번호, 제품명, 물질명, CAS, 용도, 고객사로 검색" oninput="S.q=this.value; render()">
+      <select class="in" id="sort" style="width:auto" onchange="S.sort=this.value; render()">
+        <option value="new">최신순</option><option value="num">관리번호순</option><option value="name">제품명순</option>
+      </select>
+    </div>
+  </div>
+  <div class="page">
+    <div id="structPanel">
+      <div class="editorBox" id="qEditor"></div>
+      <div class="row">
+        <div class="seg">
+          <label><input type="radio" name="smode" value="sub" checked><span>부분구조</span></label>
+          <label><input type="radio" name="smode" value="exact"><span>완전일치</span></label>
+          <label><input type="radio" name="smode" value="sim"><span>유사구조</span></label>
+        </div>
+        <label title="단일·이중결합과 방향족 여부를 무시하고 원자 연결만 비교"><input type="checkbox" id="skel"> 골격만 비교</label>
+        <span style="flex:1"></span>
+        <button onclick="clearStruct()">지우기</button>
+        <button class="primary" onclick="runStruct()">검색</button>
+      </div>
+      <div class="row" style="margin-top:0"><input class="in" id="qPaste" placeholder="SMILES 또는 Molfile 붙여넣기" style="flex:1"><button onclick="applyPaste('qPaste', S.qEditor)">편집기에 넣기</button></div>
+    </div>
+    <div id="status">불러오는 중…</div>
+    <div id="zeroHint" class="row" style="display:none;margin:0 0 10px"><span class="hint">결합 종류(단일·이중)가 달라 못 찾았을 수 있습니다.</span><button class="sm" onclick="document.getElementById('skel').checked=true;runStruct()">골격만 비교로 다시 찾기</button></div>
+    <div id="grid"></div>
+  </div>
+</section>
+
+<section id="view_partners" style="display:none">
+  <div class="top"><div class="ttl"><h1>거래처</h1><button class="primary edit-only" id="ptAdd" onclick="openPartner()">+ 추가</button></div>
+    <div class="settabs" id="ptTabs"></div></div>
+  <div class="page"><div id="ptBody"></div></div>
+</section>
+
+<!-- MSDS -->
+<section id="view_msds" style="display:none">
+  <div class="top"><div class="ttl"><h1>MSDS 작성</h1></div></div>
+  <div class="page">
+    <div id="m_from" style="margin:0 0 8px;min-height:4px"></div>
+    <div class="msdsGrid">
+      <div>
+        <div class="box"><h3>① 제품</h3>
+          <div class="f">
+            <div class="c4"><label>제품명 *</label><input id="m_제품명" list="m_samples" onchange="msdsPick()" oninput="msdsPreview()" placeholder="등록된 샘플을 고르면 자동으로 채워짐"><datalist id="m_samples"></datalist></div>
+            <div class="c2"><label>양식</label><div class="seg" id="m_양식" onchange="msdsPreview()"></div></div>
+            <div class="c2"><label>성상</label><input id="m_성상" oninput="msdsPreview()" placeholder="비우면 용액=액체, 원액=고체"></div>
+            <div class="c1"><label>색상</label><input id="m_색상" oninput="msdsPreview()"></div>
+            <div class="c2"><label>권고 용도</label><input id="m_용도" oninput="msdsPreview()" value="연구개발용"></div>
+            <div class="c1"><label>분자량</label><input id="m_분자량" oninput="msdsPreview()" placeholder="단일 물질"></div>
+          </div></div>
+        <div class="box"><h3>② 성분 (구성성분의 명칭 및 함유량)</h3>
+          <div id="m_comp"></div>
+        </div>
+        <div class="row" style="margin-top:4px">
+          <button class="primary" onclick="makeMsds('orig')">Excel</button><button class="primary" onclick="makeMsds('pdf')">PDF</button>
+          <button class="edit-only" onclick="msdsToSample()" title="이 제품을 샘플 목록에 등록합니다(관리번호 자동). 성분이 여러 개면 혼합물로">샘플로 저장</button>
+          <button onclick="cancelMsds()">새로 쓰기</button>
+          <label class="hint" title="같은 제품·양식·형태로 다시 만들면 개정 번호가 붙습니다"><input type="checkbox" id="m_hist" checked> 이력 남기기</label>
+          <span id="m_msg" class="msg"></span>
+        </div>
+        <div class="box" style="margin-top:16px"><h3>작성 이력<span class="sp"></span><input class="in" id="m_hq" type="search" placeholder="제품명·성분·CAS로 찾기" oninput="renderMsdsHist()" style="max-width:260px"></h3>
+          <div id="m_hlist"></div></div>
+      </div>
+      <div class="prev"><div class="box"><h3>미리보기</h3><div id="m_prev"></div></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="view_settings" style="display:none">
+  <div class="top"><div class="ttl"><h1>설정</h1></div>
+    <div class="settabs" id="setTabs"></div></div>
+  <div class="page"><div id="setBody"></div></div>
+</section>
+</main>
+</div>
+
+<!-- 상세 -->
+<div class="modal" id="detail" onclick="if(event.target===this) closeModal('detail')">
+  <div class="sheet w-l">
+    <div class="sh"><h2 id="dName"></h2><button class="edit-only" id="dEdit">샘플 수정</button><button class="x" onclick="closeModal('detail')">닫기</button></div>
+    <div class="dtabs" id="dTabs"></div>
+    <div class="sb" id="dInfo">
+      <div class="dgrid"><div class="detailStruct" id="dStruct"></div><div><div class="kv1" id="dKv"></div><div class="meta-foot" id="dFoot"></div></div></div>
+      <div class="shsums" id="dShipSum"></div>
+    </div>
+    <div class="sb" id="dExTab" style="display:none">
+      <div class="box edit-only"><h3>서류</h3>
+        <div class="f">
+          <div class="c2"><label>신청 회사</label><select id="xd_co" onchange="renderExDocs()"></select></div>
+          <div class="c2"><label>연구개발기관</label><select id="xd_inst" onchange="renderExDocs()"></select></div>
+          <div class="c2"><label>날짜</label><input type="date" id="xd_date"></div>
+          <div class="c6"><label>물질명</label><div class="cpy"><input id="xd_name" oninput="renderExDocs()"><button class="sm" onclick="copyField('xd_name',this)">복사</button></div></div>
+          <div class="c6"><label>용도 <span class="lh">신고면제 '구체적 용도에 대한 설명' · 고치면 샘플에도 저장</span></label><div class="cpy"><input id="xd_use" onchange="saveUse()"><button class="sm" onclick="copyField('xd_use',this)">복사</button></div></div>
+        </div>
+        <div class="docs" id="xd_rows"></div></div>
+      <div class="box" id="exRecBox" ondragover="event.preventDefault();this.classList.add('drop')" ondragleave="this.classList.remove('drop')" ondrop="event.preventDefault();this.classList.remove('drop');exNotice(event.dataTransfer.files[0])"><h3>기록<span class="sp"></span><button class="sm edit-only" onclick="openEx()">+ 신청 기록</button></h3><div id="dEx"></div></div>
+    </div>
+    <div class="sb" id="dShipTab" style="display:none">
+      <div id="sd_note"></div>
+      <div class="box"><h3>서류 받기</h3>
+        <div class="f">
+          <div class="c2"><label>출고사</label><select id="sd_co" onchange="sdChanged()"></select></div>
+          <div class="c2"><label>고객사</label><select id="sd_cust" onchange="sdChanged()"></select></div>
+          <div class="c2"><label>제출 형태</label><div class="seg" id="sd_형태" onchange="sdFormRender()"></div></div>
+        </div>
+        <div id="sd_형태칸" class="formpanel" style="display:none"></div>
+        <div class="docs" id="sd_rows"></div></div>
+      <div class="box"><h3>제출 기록 남기기</h3>
+        <div class="f">
+          <div class="c2"><label>서류 제출일</label><input type="date" id="sd_date"></div>
+          <div class="c4 fend"><button class="primary" onclick="recordSubmit()">기록하기</button><span class="msg" id="sd_msg"></span></div>
+        </div>
+        <p class="hint" style="margin:8px 0 0">위 출고사·고객사로 [샘플 정보]의 출고 기록에 남깁니다. 안 남겨도 됩니다.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- 등록·수정 -->
+<div class="modal" id="form">
+  <div class="sheet w-l">
+    <div class="sh"><h2 id="fTitle">샘플 등록</h2><button class="x" onclick="closeModal('form')">닫기</button></div>
+    <div class="sb">
+      <div class="box"><h3>기본 정보</h3>
+        <div class="f">
+          <div class="c4"><label>관리회사 *</label><div class="seg" id="f_관리회사"></div><input id="f_기타회사" list="etcDl" placeholder="기타 회사 이름" style="display:none;margin-top:6px"><datalist id="etcDl"></datalist></div>
+          <div class="c2"><label>관리번호</label><div class="no" id="f_관리번호" style="margin-top:8px"></div></div>
+          <div class="c2"><label>제품명 *</label><input id="f_제품명"></div>
+          <div class="c4"><label>물질명</label><input id="f_물질명"></div>
+          <div class="c2"><label>CAS 번호</label><input id="f_CAS" placeholder="없으면 비워두기"></div>
+          <div class="c4"><label>종류</label><div class="seg" id="f_종류"></div></div>
+          <div class="c6"><label title="출고를 등록하면 자동으로 추가됩니다">출고사</label><div class="seg" id="f_명의"></div></div>
+        </div></div>
+      <div class="box" id="structBox"><h3>구조<span class="sp"></span><span class="hint" id="fCalc" style="font-weight:400"></span></h3>
+        <div id="polyStructNote" class="hint" style="display:none">단량체 칸에 구조를 넣습니다 · <button class="linkbtn" onclick="showMainEditor()">전체 구조 그리기</button></div>
+        <div id="mainEd">
+          <div class="editorBox" id="fEditor"></div>
+          <div class="row"><input class="in" id="fPaste" placeholder="ChemDraw에서 Copy As → SMILES/Molfile 복사 후 붙여넣기 (편집기 위에서 Ctrl+V도 됨)" style="flex:1"><button onclick="applyPaste('fPaste', S.fEditor)">편집기에 넣기</button></div>
+          <div class="ion" id="ionBox"></div>
+          <div class="pc" id="pcBox"></div>
+        </div>
+      </div>
+      <div class="box" id="mixBox" style="display:none"><h3>혼합물 — 성분<span class="sp"></span><span class="hint" style="font-weight:400">MSDS 성분 표와 같습니다</span></h3>
+        <div id="f_comp"></div></div>
+      <div class="box" id="polyBox" style="display:none"><h3 title="입력 순서대로 이름에 들어갑니다 · 구조 칸을 누르면 그리기">고분자 — 단량체</h3>
+        <datalist id="monoDl"></datalist>
+        <div id="monoRows"></div>
+        <button class="sm" onclick="monoAdd('mono')">+ 단량체 추가</button>
+        <h3 style="margin-top:16px">개질</h3>
+        <div class="f">
+          <div class="c3"><label>기반 고분자</label><select id="modBase" onchange="modChange()"></select></div>
+          <div class="c3"><label>방식</label><div class="seg" id="modType"></div></div>
+        </div>
+        <div id="modRows" style="margin-top:10px"></div>
+        <button class="sm" id="modAddBtn" onclick="monoAdd('mod')">+ 붙이는 물질 추가</button>
+        <div class="row" style="margin-top:12px"><button class="primary" onclick="makePolyName()">물질명 만들기</button></div>
+        <div class="pc" id="polyCas"></div>
+      </div>
+      <div class="box"><h3>기타</h3>
+        <div class="f">
+          <div class="c2"><label>성상</label><input id="f_성상" placeholder="예: 노란색 고체 파우더"></div>
+          <div class="c2"><label>용도</label><input id="f_용도"></div>
+          <div class="c2"><label>고객사</label><input id="f_고객사" placeholder="예: 동우화인켐"></div>
+          <div class="c6"><label>비고</label><input id="f_비고"></div>
+        </div></div>
+      <div class="warn" id="fWarn"></div>
+    </div>
+    <div class="sf"><span class="sp"></span><button onclick="closeModal('form')">취소</button><button class="primary" id="fSave" onclick="saveForm()">저장</button></div>
+  </div>
+</div>
+
+<!-- 단량체 구조 -->
+<div class="modal" id="monoBox">
+  <div class="sheet w-m">
+    <div class="sh"><h2 id="mbTitle">단량체 구조</h2><button class="x" onclick="closeModal('monoBox')">닫기</button></div>
+    <div class="sb">
+      <div class="editorBox small-ed" id="mEditor"></div>
+      <div class="row"><input class="in" id="mbPaste" placeholder="SMILES/Molfile 붙여넣기" style="flex:1"><button onclick="applyPaste('mbPaste', S.mEditor)">편집기에 넣기</button><span class="hint" id="mbCalc"></span></div>
+      <div class="ion" id="mbIon"></div>
+      <div class="pc" id="mbPc"></div>
+      <div class="f" style="margin-top:12px">
+        <div class="c1"><label>약어</label><input id="mb_abbr" placeholder="예: GMA"></div>
+        <div class="c3"><label>물질명</label><input id="mb_name"></div>
+        <div class="c2"><label>CAS</label><input id="mb_cas"></div>
+      </div>
+    </div>
+    <div class="sf"><button class="danger" onclick="monoClearStruct()">구조 지우기</button><span class="sp"></span><button onclick="closeModal('monoBox')">취소</button><button class="primary" onclick="monoApply()">적용</button></div>
+  </div>
+</div>
+
+<!-- 조성 붙여넣기 -->
+<div class="modal" id="pasteBox">
+  <div class="sheet w-l">
+    <div class="sh"><h2>조성 붙여넣기</h2><button class="x" onclick="closeModal('pasteBox')">닫기</button></div>
+    <div class="sb">
+      <p class="hint" style="margin:0 0 8px">한 줄에 제품 하나. 예) <b>HI-SW-01 AgNO3 1.7%, LiCl 2.12%, TBABr3 9.64%, PVA 10% in DMSO</b> — "in" 뒤 용매는 나머지 %로 계산합니다. 여러 줄이면 제품마다 MSDS를 한 번에 만들 수 있어요.</p>
+      <textarea id="pasteTa" class="plain" style="min-height:120px"></textarea>
+      <div class="row" style="margin-top:8px"><button class="primary" onclick="pasteParse()">읽기</button></div>
+      <div id="pasteRes" style="margin-top:12px"></div>
+    </div>
+  </div>
+</div>
+<!-- 성분 사전 -->
+<div class="modal" id="dictBox">
+  <div class="sheet w-m">
+    <div class="sh"><h2 id="dictTitle">성분 사전</h2><button class="x" onclick="closeModal('dictBox')">닫기</button></div>
+    <div class="sb" id="dictBody"></div>
+    <div class="sf"><button class="danger" id="dictDel" onclick="dictDel()">삭제</button><span class="sp"></span><span id="dictMsg" class="msg"></span><button onclick="closeModal('dictBox')">취소</button><button class="primary" onclick="dictSave()">저장</button></div>
+  </div>
+</div>
+
+<!-- CAS로 구조 채우기 -->
+<div class="modal" id="casBox">
+  <div class="sheet w-m">
+    <div class="sh"><h2>CAS로 구조 채우기</h2><button class="x" onclick="closeModal('casBox')">닫기</button></div>
+    <div class="sb" id="cfBody"></div>
+    <div class="sf"><span class="sp"></span><button onclick="closeModal('casBox')">취소</button><button class="primary" id="cfSave" onclick="casFillSave()">저장</button></div>
+  </div>
+</div>
+
+<!-- 출고 -->
+<div class="modal" id="shipBox">
+  <div class="sheet w-m">
+    <div class="sh"><h2 id="sTitle">출고 등록</h2><button class="x" onclick="closeModal('shipBox')">닫기</button></div>
+    <div class="sb">
+      <div class="f">
+        <div class="c6"><label>출고사 *</label><div class="seg" id="s_명의"></div><input id="s_기타" list="etcDl" placeholder="기타 출고사 이름" style="display:none;margin-top:6px"></div>
+        <div class="c2"><label>고객사</label><input id="s_고객사" list="custDl"><datalist id="custDl"></datalist></div>
+        <div class="c2"><label>수량</label><input id="s_수량" placeholder="예: 10 g"></div>
+        <div class="c2"><label>가격</label><div class="unit"><input id="s_가격" inputmode="decimal" placeholder="비워도 됨"><span>만원</span></div></div>
+        <div class="c2"><label>출고일</label><input id="s_출고일" type="date"></div>
+        <div class="c4"><label>비고</label><input id="s_비고"></div>
+      </div>
+    </div>
+    <div class="sf"><button class="danger edit-only" id="sDel" onclick="delShip()">삭제</button><span class="sp"></span><span id="sMsg" class="msg"></span><button onclick="closeModal('shipBox')">취소</button><button class="primary" onclick="saveShip()">저장</button></div>
+  </div>
+</div>
+
+<!-- 신고면제 -->
+<div class="modal" id="exBox">
+  <div class="sheet w-m">
+    <div class="sh"><h2 id="eTitle">신고면제</h2><button class="x" onclick="closeModal('exBox')">닫기</button></div>
+    <div class="sb">
+      <div class="box"><h3>신청</h3>
+        <div class="f">
+          <div class="c3"><label>연구개발기관(고객사)</label><select id="e_기관"></select></div>
+          <div class="c3"><label>신청 회사</label><select id="e_신청회사"></select></div>
+          <div class="c2"><label title="유효기간은 신청일 기준 1년 − 1일로 자동 계산">신청일</label><input id="e_신청일" type="date"></div>
+        </div>
+        <p class="hint" id="eOld" style="margin:10px 0 0">통지서는 저장한 뒤 기록 줄의 [통지서 넣기]로 넣습니다. 예전에 받은 통지서가 이미 있으면 <label style="cursor:pointer;color:var(--accent);font-weight:600"><input type="file" id="eFile2" accept=".pdf" onchange="readNoticeFile(this)" style="display:none">여기서 PDF 읽기</label></p></div>
+      <div class="box" id="eNotice"><h3>통지<span class="sp"></span><label class="sm" style="cursor:pointer"><input type="file" id="eFile" accept=".pdf" onchange="readNoticeFile(this)" style="display:none"><span class="b info big" title="읽어서 칸만 채우고 파일은 저장하지 않습니다">통지서 PDF 읽기</span></label></h3>
+        <div class="f">
+          <div class="c3"><label>면제확인번호</label><input id="e_면제번호"></div>
+          <div class="c2"><label>통지일</label><input id="e_통지일" type="date"></div>
+          <div class="c4"><label>물질명</label><input id="e_통지물질명"></div>
+          <div class="c2"><label>CAS</label><input id="e_통지CAS"></div>
+        </div>
+        <div class="warn" id="eWarn"></div></div>
+    </div>
+    <div class="sf"><button class="danger" id="eDel" onclick="delEx()">삭제</button><span class="sp"></span><button onclick="closeModal('exBox')">취소</button><button class="primary" onclick="saveEx()">저장</button></div>
+  </div>
+</div>
+
+<!-- 거래처 수정 -->
+<div class="modal" id="ptBox">
+  <div class="sheet w-m">
+    <div class="sh"><h2 id="ptTitle">거래처</h2><button class="x" onclick="closeModal('ptBox')">닫기</button></div>
+    <div class="sb" id="ptForm"></div>
+    <div class="sf"><button class="danger edit-only" id="ptDel" onclick="delPartner()">삭제</button><span class="sp"></span><span id="ptMsg" class="msg"></span><button onclick="closeModal('ptBox')">닫기</button><button class="primary edit-only" onclick="savePartner()">저장</button></div>
+  </div>
+</div>
+
+<!-- 비밀번호 -->
+<div class="modal" id="pwBox">
+  <div class="sheet w-s">
+    <div class="sh"><h2>편집 모드</h2><button class="x" onclick="closeModal('pwBox')">닫기</button></div>
+    <div class="sb"><input type="password" class="in" id="pwIn" placeholder="비밀번호" onkeydown="if(event.key==='Enter')submitPw()"><div class="warn err" id="pwErr"></div></div>
+    <div class="sf"><button onclick="closeModal('pwBox')">취소</button><button class="primary" onclick="submitPw()">확인</button></div>
+  </div>
+</div>
+
+<?!= include('Editor') ?>
+<?!= include('Docs') ?>
+<?!= include('App') ?>
+</body>
+</html>

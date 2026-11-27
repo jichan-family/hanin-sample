@@ -19,6 +19,8 @@
 ## Claude 입력 통로 (v0.5.3~)
 - 앱 주소로 POST: {code, action:'preview'|'apply', ops:[...]}. code = 스크립트 속성 CLAUDE_CODE(사용자가 설정 → 여러 개 등록에서 정함, 대화에서 받음).
 - ops: addSample{data} · updateSample{관리번호, data} · addShipment{관리번호, data}. 구조는 tools/claude_ops.js로 계산(smiles → idcode 등).
+- v0.5.7~: 같은 묶음 안의 addShipment가 방금 addSample한 관리번호를 찾음(미리보기에서도) → 등록+출고를 한 번에. 용도는 서버에서 '~ 연구개발용'으로 맞춤, 출고 가격은 만원 단위 숫자(300)로 맞춤.
+- 용도 규칙: 사용자가 용도를 알려주면 항상 '~ 연구개발용'으로 저장(신고면제 '구체적 용도에 대한 설명').
 - 보내는 법: 내장 브라우저에 앱을 연 뒤 javascript_tool로
   `await (await fetch(location.href.split('?')[0], {method:'POST', body: JSON.stringify(req)})).json()`
   (본문은 문자열 → text/plain, preflight 없음). 먼저 preview로 사용자에게 보여주고 apply.
@@ -30,3 +32,12 @@
 - 조성 붙여넣기: "HI-SW-01 AgNO3 1.7%, LiCl 2.12% in DMSO" 줄마다 제품 하나. 여러 줄이면 한 번에 Excel.
 - 작성 이력: 시트 'MSDS이력' 입력 JSON(성분 포함) → 화면에서 검색·불러오기. [샘플로 저장] = 혼합물 샘플 생성.
 - 15번 규제 중 산안법·화관법은 기본값이 '확인 필요' — 사용자 확인 후 사전에서 고침.
+- v0.5.7 MSDS 엑셀: 출고사 'MSDS양식'에 따라 docs.js buildMsdsHanin(ExcelJS, 기존 회사 양식 비슷하게·내용은 E열 한 칸·병합은 머리말 상자·구성성분 표만) / buildMsdsLs(받은 엘에스켐 파일을 틀로 JSZip+DOMParser로 칸 값만 바꿈, 성분 3개 이상이면 33행 복사해 아래를 밀어냄, 그림문자는 B20에 새로 그림). 틀·로고는 Forms.gs FORMS.msdsLs·logoHanin(tools/mk_msds_tpl.py로 만듦).
+- 엘에스켐 1번 권고 용도는 앱 값(기본 '연구개발용')을 씀 — 원본의 '감압점착제…'를 쓸지는 사용자에게 아직 확인 안 함.
+
+## 화면 공통 (v0.5.7~)
+- 저장·삭제 버튼은 app.js busy()로 감쌈('저장 중…', 끝나면 창 닫고 toast '저장됨', 오류면 창 유지). 새 저장 함수도 같은 방식으로.
+- 창 닫기는 글자 [닫기](.sh .x) + Esc. 넓은 곳 표시는 coFull('한인' → '한인정밀화학'), 저장 값은 '한인'.
+- 신고면제: [+ 신청 기록]은 신청 칸만, 통지는 기록 줄의 [통지서 넣기](exNoticeFor) → 확인 후 저장하면 통지 완료. 줄마다 [삭제].
+- 단량체 사전 [CAS로 구조 채우기] = 서버 pubchemByCas(CAS → SMILES) → RDKit 정리 → 미리보기 후 저장.
+- 시험: /home/claude/t7.py(화면), nt/t.cjs(MSDS 엑셀을 node에서 만들어 LibreOffice로 PDF 확인).
