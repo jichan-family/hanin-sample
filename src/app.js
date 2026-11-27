@@ -18,6 +18,21 @@ async function remove(t, id) { await call('deleteRow', S.pw, t, id); S.data[t] =
 function setting(id, def) { const r = rows('설정').find(x => x.id === id); return r && r['값'] !== '' ? r['값'] : def; }
 const errMsg = e => esc((e && e.message) || e);
 function flash(id, text, ok = true) { const el = $(id); if (!el) return; el.className = 'msg ' + (ok ? 'ok' : 'bad'); el.innerHTML = text; }
+// 서류 만들기 꼬리표: 만든 샘플이 지금 열려 있을 때만 그 줄에 ✓, 아니면 화면 아래 알림
+function toast(text, ok = true) {
+  let t = $('toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
+  const el = document.createElement('div'); el.className = 'tmsg ' + (ok ? 'ok' : 'bad'); el.innerHTML = text; t.appendChild(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, ok ? 3500 : 6000);
+}
+function docJob(msgId, label) {
+  const sid = S.cur && S.cur.id, no = S.cur ? (S.cur['관리번호'] || S.cur['제품명']) : '';
+  const here = () => $('detail').classList.contains('open') && S.cur && S.cur.id === sid;
+  return {
+    busy(t) { if (here()) flash(msgId, t); },
+    done(ok = true, err = '') { if (here()) flash(msgId, ok ? '✓' : err, ok); else toast(ok ? `${esc(no)} ${esc(label)} 다운로드 완료` : `${esc(no)} ${esc(label)} 실패: ${err}`, ok); }
+  };
+}
+window.docJob = docJob;
 const dash = v => (v == null || v === '') ? '<span class="dash">-</span>' : esc(v);
 const list = v => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
 
@@ -96,6 +111,29 @@ function parseText(txt) {
   if (/^<\?xml|<CDXML/i.test(t)) throw new Error('CDXML 형식은 읽을 수 없습니다. ChemDraw에서 Copy As → SMILES 또는 Molfile로 복사해 주세요.');
   return M.fromSmiles(t.split(/\s+/)[0]);
 }
+// ---------- 구조 배치 정리 (RDKit CoordGen: 큰 고리·스피로 구조도 켐드로우처럼) ----------
+let RDK = null;
+async function rdkit() {
+  if (RDK) return RDK;
+  await Docs.loadScript('rdkit');
+  const base = document.querySelector('script[src*="RDKit_minimal"]').src.replace(/RDKit_minimal\.js.*$/, '');
+  RDK = await window.initRDKitModule({ locateFile: () => base + 'RDKit_minimal.wasm' }); RDK.prefer_coordgen(true); return RDK;
+}
+async function tidyMol(m) {
+  if (!m || !m.getAllAtoms()) return m;
+  const R = await rdkit(), r = R.get_mol(m.toMolfile());
+  if (!r || !r.is_valid()) { if (r) r.delete(); throw new Error('구조를 정리하지 못했습니다.'); }
+  try { r.set_new_coords(true); return S.OCL.Molecule.fromMolfile(r.get_molblock()); } finally { r.delete(); }
+}
+window.tidyMol = tidyMol;
+// 붙여넣기: Molfile은 원래 배치 그대로, SMILES는 정리한 배치로
+async function pasteInto(editor, txt) {
+  const isMolfile = /M\s+END/.test(txt) || /V[23]000/.test(txt), m = parseText(txt); if (!m) return false;
+  editor.setMolecule(m);
+  if (!isMolfile && !editor.fragment) { try { editor.setMolecule(await tidyMol(m), true); } catch (e) { console.warn(e); } }
+  return true;
+}
+window.pasteInto = pasteInto;
 const smilesOf = m => { try { return m.toIsomericSmiles ? m.toIsomericSmiles() : m.toSmiles(); } catch (e) { return ''; } };
 function prepQuery(mol, skeleton) {
   const M = S.OCL.Molecule, f = mol.getCompactCopy();
@@ -200,7 +238,8 @@ const baseName = s => Docs.safeName(s ? `${s['관리번호'] ? s['관리번호']
 
 // ---------- 신고면제 · 상태 ----------
 const exOf = (sid, inst) => rows('신고면제').filter(e => e['샘플id'] === sid && (!inst || (e['기관'] || '동우화인켐') === inst)).sort((a, b) => (b['신청일'] || '').localeCompare(a['신청일'] || ''));
-const shipsOf = sid => rows('출고').filter(e => e['샘플id'] === sid).sort((a, b) => (b['요청일'] || b['등록일'] || '').localeCompare(a['요청일'] || a['등록일'] || ''));
+const shipDate = x => x['출고일'] || x['서류제출일'] || x['요청일'] || String(x['등록일'] || '').slice(0, 10);
+const shipsOf = sid => rows('출고').filter(e => e['샘플id'] === sid).sort((a, b) => shipDate(b).localeCompare(shipDate(a)) || String(b['등록일'] || '').localeCompare(String(a['등록일'] || '')));
 function exState(e) {
   if (e['결과'] === '비대상') return { k: '반려', cls: 'bad', txt: '비대상(면제 안 됨)' };
   if (e['면제번호']) {
@@ -296,7 +335,7 @@ function exDot(sid) {
 function renderDetail() {
   const s = S.cur, st = sampleStatus(s.id);
   $('dName').innerHTML = `${noTag(s)}<span class="dn">${esc(s['제품명'])}</span>${st ? `<span class="b ${st.cls}" style="margin-left:6px">${st.txt}</span>` : ''}`;
-  $('dTabs').innerHTML = [['info', '샘플 정보', ''], ['ex', '신고면제', exDot(s.id)], ['ship', '출고 서류', '']].map(([k, l, d]) => `<button class="tab ${S.dTab === k ? 'on' : ''}" onclick="setDTab('${k}')">${l}${d}</button>`).join('');
+  $('dTabs').innerHTML = [['info', '샘플 정보', ''], ['ex', '신고면제', exDot(s.id)], ...(document.body.classList.contains('editing') ? [['ship', '제출 서류', '']] : [])].map(([k, l, d]) => `<button class="tab ${S.dTab === k ? 'on' : ''}" onclick="setDTab('${k}')">${l}${d}</button>`).join('');
   $('dInfo').style.display = S.dTab === 'info' ? '' : 'none'; $('dExTab').style.display = S.dTab === 'ex' ? '' : 'none'; $('dShipTab').style.display = S.dTab === 'ship' ? '' : 'none';
   const m = S.OCL && molOf(s), mv = !m && S.OCL ? monoView(s, 500, 240) : '';
   $('dStruct').classList.toggle('small', !m && !mv);
@@ -311,12 +350,7 @@ function renderDetail() {
   if (s['용매농도']) items.push(['이전 형태', s['용매농도']]);
   $('dKv').innerHTML = items.map(([k, v]) => `<div class="k">${k}</div><div>${dash(v)}</div>`).join('');
   $('dFoot').textContent = [s['등록일'] && '등록 ' + s['등록일'], s['수정일'] && '수정 ' + s['수정일']].filter(Boolean).join(' · ');
-  const SL = shipsOf(s.id);
-  $('dShipSum').style.display = SL.length ? '' : 'none';
-  $('dShipSum').innerHTML = SL.length ? `<h4>출고 내역</h4>` + SL.map(x => `<div class="shsum" onclick="setDTab('ship')" title="출고 서류 탭에서 보기">
-      <span class="d">${esc(x['출고일'] || x['요청일'] || (x['등록일'] || '').slice(0, 10))}</span><span>${esc(x['명의'] || '')} → <b>${esc(x['고객사'] || '-')}</b></span>
-      ${x['수량'] ? `<span>${esc(x['수량'])}</span>` : ''}<span class="sp"></span>${x['서류제출일'] ? '<span class="b ok">서류 제출완료</span>' : (x['출고일'] ? '' : '<span class="b">미출고</span>')}</div>`).join('') : '';
-  renderExTab(s); renderShipCards(s);
+  renderShipList(s); renderExTab(s); renderDocsTab(s);
   $('dEdit').onclick = () => { closeAllModals(); openForm(s.id); };
 }
 // ----- 신고면제 탭 -----
@@ -362,8 +396,8 @@ window.renderExDocs = () => {
     : `<div class="docrow"><span class="dash">${esc(S.exCo)}은(는) 작성할 신고면제 서류가 없습니다</span></div>`;
 };
 window.exDocRun = async (k, fk) => {
-  const s = S.cur, co = S.exCo || '한인', c = coOf(co) || { 이름: co, 회사명: co }, inst = $('xd_inst').value, nm = $('xd_name').value.trim(), msg = 'xm_' + k;
-  flash(msg, fk === 'pdf' ? 'PDF 변환 중…' : '만드는 중…');
+  const s = S.cur, co = S.exCo || '한인', c = coOf(co) || { 이름: co, 회사명: co }, inst = $('xd_inst').value, nm = $('xd_name').value.trim(), job = docJob('xm_' + k, DOC_LABEL[k]);
+  job.busy(fk === 'pdf' ? 'PDF 변환 중…' : '만드는 중…');
   try {
     if (k === '연구개발용확인서') {
       const cu = custOf(inst) || { 회사명: inst }, T = await Docs.templates();
@@ -381,8 +415,8 @@ window.exDocRun = async (k, fk) => {
     } else if (k === '단량체정보') {
       await Docs.deliver(await Docs.buildMonomerXlsx(s, parseMono(s['단량체']).map(x => ({ 물질명: x.name, CAS: x.cas }))), `${baseName(s)}_단량체정보`, 'xlsx', fk);
     }
-    flash(msg, '✓');
-  } catch (e) { flash(msg, errMsg(e), false); }
+    job.done();
+  } catch (e) { job.done(false, errMsg(e)); }
 };
 // ----- 출고 탭 -----
 function neededDocs(x) {
@@ -390,38 +424,73 @@ function neededDocs(x) {
   return need.filter(d => can.includes(d));
 }
 function defaultNeed(co, cust) { const c = custOf(cust); const base = c && c['필요서류'] ? list(c['필요서류']) : ['MSDS']; return base.filter(d => coDocs(co).includes(d)); }
-function renderShipCards(s) {
+// [샘플 정보] 아래 출고 기록 목록 (조회 모드에서도 기록 가능)
+function renderShipList(s) {
   const L = shipsOf(s.id);
-  $('dShips').innerHTML = (S.detailNote ? `<div class="warn" style="margin:0 0 10px">${esc(S.detailNote)}</div>` : '') + (L.length ? L.map(x => {
-    const need = neededDocs(x), ex = x['고객사'] ? sampleEx(s.id, x['고객사']) : null, f = parseForm(x['제출형태']), co = coOf(x['명의']), valid = ex && ex.st.k === '유효';
-    const lsForm = (co && co['MSDS양식'] === '엘에스켐') || (!co && x['명의'] === '엘에스켐'), cust = custOf(x['고객사']) || {};
-    const self = need.includes('자진확인서') ? `<div class="docrow"><b>자진확인서</b>${valid ? '' : '<span class="wmini">유효한 면제번호 없음</span>'}<span class="sp"></span><span class="msg" id="sm_${x.id}"></span>
-        <button class="sm" onclick="toggleSelf('${x.id}')">편집</button>${FMTB.docx.map(([k, l]) => `<button class="sm ${k === 'orig' ? 'primary' : ''}" ${valid ? '' : 'disabled'} onclick="selfRun('${x.id}','${k}')">${l}</button>`).join('')}</div>
-      <div class="f selfed" id="se_${x.id}" style="display:none">
-        <div class="c3"><label>To.</label><input id="se_${x.id}_TO" value="${esc(cust['영문명'] || cust['회사명'] || x['고객사'] || '')}"></div>
-        <div class="c3"><label>물질명</label><input id="se_${x.id}_물질명" value="${esc((ex && ex.e['통지물질명']) || s['물질명'] || '')}"></div>
-        <div class="c2"><label>면제번호</label><input id="se_${x.id}_면제번호" value="${esc(valid ? ex.e['면제번호'] : '')}"></div>
-        <div class="c2"><label>취급최대수량(톤)</label><input id="se_${x.id}_수량" value="${esc(setting('자진확인서수량', '0.01'))}"></div>
-        <div class="c2"><label>함량(%)</label><input id="se_${x.id}_함량" value="${f && f.t === 'sol' ? f.p : 100}"></div></div>` : '';
-    const msds = need.includes('MSDS') ? `<div class="docrow"><b>MSDS${lsForm ? ' (엘에스켐 양식)' : ''}</b><span class="sp"></span><button class="sm primary" onclick="goMsdsShip('${x.id}')">작성</button></div>` : '';
-    const sub = need.length ? `<div class="docrow"><b>서류 제출</b>${x['서류제출일'] ? `<span class="b ok">${esc(x['서류제출일'])}</span>` : ''}<span class="sp"></span><span class="msg" id="sd_${x.id}"></span><input type="date" id="sdd_${x.id}" value="${esc(x['서류제출일'] || S.today)}" class="dsm"><button class="sm" onclick="saveSubmit('${x.id}')">저장</button></div>` : '';
-    return `<div class="scard"><div class="shead">${coBadge(x['명의'] || '?')}<b>${esc(x['고객사'] || '고객사 미입력')}</b>${x['고객사담당자'] ? `<span class="hint">${esc(x['고객사담당자'])}</span>` : ''}
-        <span class="hint">요청 ${dash(x['요청일'])}</span><span class="hint">${x['출고일'] ? '출고 ' + esc(x['출고일']) : '미출고'}</span><span class="hint">${esc(formText(f))}${x['수량'] ? ' · ' + esc(x['수량']) : ''}</span>
-        ${x['고객사'] ? (ex ? `<span class="b ${ex.st.cls}" title="${esc(x['고객사'])} 신고면제">${ex.st.txt}</span>` : '<span class="b etc">신고면제 없음</span>') : ''}<span class="sp"></span><button class="sm" onclick="openShip('${x.id}')">수정</button></div>
-      <div class="edit-only scdocs">${self}${msds}${sub}</div></div>`;
-  }).join('') : '<p class="empty">출고 기록 없음</p>');
+  $('dShipSum').innerHTML = `<div class="sechead"><h4>출고 기록</h4><span class="sp"></span><button class="sm" onclick="openShip()">+ 출고 기록</button></div>` + (L.length ? L.map(x => `<div class="shsum" onclick="openShip('${x.id}')" title="눌러서 고치기">
+      <span class="d">${esc(shipDate(x))}</span>${coBadge(x['명의'] || '?')}<span>→ <b>${esc(x['고객사'] || '고객사 미입력')}</b></span>
+      ${x['수량'] ? `<span class="q">${esc(x['수량'])}</span>` : ''}<span class="sp"></span>${x['서류제출일'] ? `<span class="b ok">서류 제출 ${esc(x['서류제출일'])}</span>` : ''}${!x['출고일'] && x['서류제출일'] ? '<span class="b etc">서류만</span>' : ''}</div>`).join('')
+    : '<div class="emptybox">아직 출고 기록이 없습니다. 샘플이 나가면 [+ 출고 기록]으로 날짜·고객사·수량을 남겨 두세요.</div>');
 }
-window.toggleSelf = id => { const el = $('se_' + id); el.style.display = el.style.display === 'none' ? '' : 'none'; };
-window.selfRun = async (id, fk) => {
-  const s = S.cur, x = rows('출고').find(r => r.id === id), f = parseForm(x['제출형태']), g = k => $(`se_${id}_${k}`).value.trim(), msg = 'sm_' + id;
-  const v = { TO: g('TO'), 제품명: s['제품명'], 물질명: g('물질명'), 면제번호: g('면제번호'), 수량: g('수량'), 함량: g('함량'), 확인일: dotDate(S.today) };
-  if (!v.면제번호) { flash(msg, '면제번호 없음', false); return; }
-  flash(msg, fk === 'pdf' ? 'PDF 변환 중…' : '만드는 중…');
-  try { await Docs.deliver(await Docs.buildSelfCheck(v), `${baseName(s)}_자진확인서${formSuffix(f)}`, 'docx', fk); flash(msg, '✓'); } catch (e) { flash(msg, errMsg(e), false); }
+// ----- [제출 서류] 탭: 기록 없이 바로 서류 받기 -----
+function sdInit(s) {
+  if (S.sd && S.sd.sid === s.id) return;
+  const last = shipsOf(s.id)[0], f = (last && parseForm(last['제출형태'])) || legacyForm(s) || { t: 'neat' };
+  S.sd = { sid: s.id, co: (last && last['명의']) || namesOf(s)[0] || companyOf(s) || '한인', cust: (last && last['고객사']) || '동우화인켐', F: JSON.parse(JSON.stringify(f)) };
+}
+window.SD = { add(k) { addSolvTo(S.sd.F, k); this.draw(); }, draw() { solvEditor('sd_형태칸', S.sd.F, 'SD'); this.sum(); },
+  get F() { return S.sd.F; }, sum() { SF.sum.call({ F: S.sd.F }, 'sd_형태칸'); if ($('se_함량')) $('se_함량').value = S.sd.F.p; } };
+function sdShip() { const S2 = S.sd; return { 명의: S2.co, 고객사: S2.cust, 제출형태: JSON.stringify(S2.F), 함량: S2.F.t === 'sol' ? String(S2.F.p) : '100' }; }
+function renderDocsTab(s) {
+  if (S.detailNote && S.detailCust) { S.sd = null; }
+  sdInit(s); if (S.detailCust) { S.sd.cust = S.detailCust; S.detailCust = ''; }
+  const N = [...new Set([...coNames(), S.sd.co])], custs = [...new Set([...rows('고객사').map(x => x['회사명']), S.sd.cust].filter(Boolean))];
+  $('sd_note').innerHTML = S.detailNote ? `<div class="warn" style="margin:0 0 12px">${esc(S.detailNote)}</div>` : ''; S.detailNote = '';
+  $('sd_co').innerHTML = N.map(c => `<option ${c === S.sd.co ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  $('sd_cust').innerHTML = custs.map(c => `<option ${c === S.sd.cust ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  seg('sd_형태', ['물질 그대로', '용액·혼합물'], [S.sd.F.t === 'sol' ? '용액·혼합물' : '물질 그대로'], 'radio');
+  $('sd_date').value = S.today; $('sd_msg').textContent = '';
+  sdFormRender();
+}
+window.sdChanged = () => { S.sd.co = $('sd_co').value; S.sd.cust = $('sd_cust').value; renderSdRows(); };
+window.sdFormRender = () => {
+  const sol = segVal('sd_형태') === '용액·혼합물';
+  if (!sol) { S.sd.F = { t: 'neat' }; $('sd_형태칸').innerHTML = ''; $('sd_형태칸').style.display = 'none'; renderSdRows(); return; }
+  if (S.sd.F.t !== 'sol') S.sd.F = { t: 'sol', p: 100, s: [] };
+  $('sd_형태칸').style.display = ''; SD.draw(); renderSdRows();
 };
-window.saveSubmit = async id => {
-  const x = rows('출고').find(r => r.id === id), d = $('sdd_' + id).value;
-  try { const r = await call('saveShipment', Object.assign({}, x, { 서류제출일: d })); upsert('출고', r.ship); renderDetail(); render(); } catch (e) { flash('sd_' + id, errMsg(e), false); }
+function renderSdRows() {
+  const s = S.cur, x = sdShip(), can = coDocs(x['명의']), need = defaultNeed(x['명의'], x['고객사']), ex = sampleEx(s.id, x['고객사']), valid = ex && ex.st.k === '유효';
+  const co = coOf(x['명의']), lsForm = (co && co['MSDS양식'] === '엘에스켐') || (!co && x['명의'] === '엘에스켐'), cust = custOf(x['고객사']) || {}, f = S.sd.F;
+  const docs = SUB_DOCS.filter(d => can.includes(d));
+  const exTxt = ex ? `<span class="b ${ex.st.cls}">${esc(x['고객사'])} 신고면제 · ${ex.st.txt}</span>` : `<span class="b etc">${esc(x['고객사'])} 신고면제 기록 없음</span>`;
+  const row = d => {
+    const off = !need.includes(d) ? ' off' : '', tip = off ? `title="${esc(x['고객사'])}에는 보통 필요 없음"` : '';
+    if (d === '자진확인서') return `<div class="docrow${off}" ${tip}><b>자진확인서</b>${valid ? '' : '<span class="wmini">유효한 면제번호 없음</span>'}<span class="sp"></span><span class="msg" id="sm_self"></span>
+        <button class="sm" onclick="toggleSelf()">편집</button>${FMTB.docx.map(([k, l]) => `<button class="sm ${k === 'orig' ? 'primary' : ''}" ${valid ? '' : 'disabled'} onclick="selfRun('${k}')">${l}</button>`).join('')}</div>
+      <div class="f selfed" id="se_box" style="display:none">
+        <div class="c3"><label>To.</label><input id="se_TO" value="${esc(cust['영문명'] || cust['회사명'] || x['고객사'] || '')}"></div>
+        <div class="c3"><label>물질명</label><input id="se_물질명" value="${esc((ex && ex.e['통지물질명']) || s['물질명'] || '')}"></div>
+        <div class="c2"><label>면제번호</label><input id="se_면제번호" value="${esc(valid ? ex.e['면제번호'] : '')}"></div>
+        <div class="c2"><label>취급최대수량(톤)</label><input id="se_수량" value="${esc(setting('자진확인서수량', '0.01'))}"></div>
+        <div class="c2"><label>함량(%)</label><input id="se_함량" value="${f && f.t === 'sol' ? f.p : 100}"></div></div>`;
+    return `<div class="docrow${off}" ${tip}><b>MSDS${lsForm ? ' (엘에스켐 양식)' : ''}</b><span class="sp"></span><button class="sm primary" onclick="goMsdsDocs()">작성</button></div>`;
+  };
+  $('sd_rows').innerHTML = `<div class="xdbar" style="margin:4px 0 2px">${exTxt}</div>` + (docs.length ? docs.map(row).join('') : `<div class="docrow"><span class="dash">${esc(x['명의'])}은(는) 작성할 제출 서류가 없습니다</span></div>`);
+}
+window.toggleSelf = () => { const el = $('se_box'); el.style.display = el.style.display === 'none' ? '' : 'none'; };
+window.selfRun = async fk => {
+  const s = S.cur, g = k => $('se_' + k).value.trim(), job = docJob('sm_self', '자진확인서'), co = coOf(S.sd.co) || {};
+  const v = { TO: g('TO'), 제품명: s['제품명'], 물질명: g('물질명'), 면제번호: g('면제번호'), 수량: g('수량'), 함량: g('함량'), 확인일: dotDate(S.today) };
+  if (!v.면제번호) { flash('sm_self', '면제번호 없음', false); return; }
+  job.busy(fk === 'pdf' ? 'PDF 변환 중…' : '만드는 중…');
+  try { const T = await Docs.templates(); await Docs.deliver(await Docs.buildSelfCheck(v, co['직인'] || (S.sd.co === '한인' ? T.stamp : null)), `${baseName(s)}_자진확인서${formSuffix(S.sd.F)}`, 'docx', fk); job.done(); } catch (e) { job.done(false, errMsg(e)); }
+};
+window.goMsdsDocs = () => { const s = S.cur; msdsFromSample(s, sdShip()); navTo('msds', s.id, 'ship'); };
+// 서류를 낸 뒤 기록으로 남기기(선택)
+window.recordSubmit = async () => {
+  const s = S.cur, x = Object.assign(sdShip(), { 샘플id: s.id, 제품명: s['제품명'], 서류제출일: $('sd_date').value, 필요서류: defaultNeed(S.sd.co, S.sd.cust).join(',') });
+  try { const r = await call('saveShipment', x); upsert('출고', r.ship); if (r.sample) { upsert('샘플', r.sample); S.cur = r.sample; } flash('sd_msg', '기록했습니다 ✓'); renderShipList(S.cur); render(); } catch (e) { flash('sd_msg', errMsg(e), false); }
 };
 
 // ---------- 편집 모드 (계속 기억) ----------
@@ -448,15 +517,15 @@ window.toggleStruct = async () => {
 };
 window.applyPaste = (taId, editor) => {
   const ta = $(taId);
-  try { const m = parseText(ta.value); if (!m) return; editor.setMolecule(m); ta.value = ''; }
-  catch (e) { alert('구조를 읽지 못했습니다. ' + (e.message || '')); }
+  const t = ta.value; ta.value = '';
+  pasteInto(editor, t).catch(e => { ta.value = t; alert('구조를 읽지 못했습니다. ' + (e.message || '')); });
 };
 document.addEventListener('paste', e => {
   const txt = (e.clipboardData || window.clipboardData).getData('text');
   const target = $('monoBox').classList.contains('open') ? S.mEditor : $('form').classList.contains('open') ? S.fEditor : ($('structPanel').classList.contains('open') && S.view === 'list' ? S.qEditor : null);
   if (!target || !txt || /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
-  try { const m = parseText(txt); if (!m) return; e.preventDefault(); e.stopPropagation(); target.setMolecule(m); }
-  catch (err) { alert('붙여넣은 내용을 구조로 읽지 못했습니다. ' + (err.message || '')); }
+  try { if (!parseText(txt)) return; } catch (err) { alert('붙여넣은 내용을 구조로 읽지 못했습니다. ' + (err.message || '')); return; }
+  e.preventDefault(); e.stopPropagation(); pasteInto(target, txt);
 }, true);
 window.runStruct = () => {
   if (S.qEditor.isEmpty()) { alert('찾을 구조를 그리거나 붙여넣어 주세요.'); return; }
@@ -683,7 +752,7 @@ window.saveForm = async () => {
 function solvEditor(boxId, F, onchg) {
   // F: {t:'sol', p, s:[{k,p}]} 를 직접 고침
   const used = new Set(F.s.map(c => c.k));
-  $(boxId).innerHTML = `<div class="row" style="margin:0 0 8px"><span>용질(제품) 함량</span><input type="number" step="any" value="${F.p}" style="width:90px;height:34px;border:1px solid #cfd6de;border-radius:8px;padding:0 8px;text-align:right" oninput="${onchg}.F.p=+this.value;${onchg}.sum()"> %</div>
+  $(boxId).innerHTML = `<div class="row" style="margin:0 0 8px"><span>용질(제품) 함량</span><input type="number" step="any" value="${F.p}" class="num" style="width:90px;text-align:right" oninput="${onchg}.F.p=+this.value;${onchg}.sum()"> %</div>
     <div class="solvbtns">${Docs.SOLV_ORDER.map(k => `<button ${used.has(k) ? 'disabled' : ''} onclick="${onchg}.add('${k}')">+ ${SOLV_SHORT[k]}</button>`).join('')}</div>
     ${F.s.map((c, i) => `<div class="srow"><div><b>${esc(Docs.SOLV[c.k].name)}</b> <span class="hint">${esc(Docs.SOLV[c.k].ko)}</span></div>
       <div class="pct"><input type="number" step="any" value="${c.p}" oninput="${onchg}.F.s[${i}].p=+this.value;${onchg}.sum()"> %</div><button class="sm" onclick="${onchg}.F.s.splice(${i},1);${onchg}.draw()">삭제</button></div>`).join('') || '<p class="empty">용매 없음</p>'}
@@ -697,61 +766,45 @@ function addSolvTo(F, key) {
   F.s.push({ k: key, p: give });
 }
 window.SF = { F: null, add(k) { addSolvTo(this.F, k); this.draw(); }, draw() { solvEditor('s_형태칸', this.F, 'SF'); this.sum(); },
-  sum() { const t = +((+this.F.p || 0) + this.F.s.reduce((a, c) => a + (+c.p || 0), 0)).toFixed(2), el = $('s_형태칸_sum'); if (el) el.innerHTML = Math.abs(t - 100) < 0.01 ? '<span class="msg ok">합계 100% ✓</span>' : `<span class="msg bad">합계 ${t}%</span>`; } };
-window.shipFormRender = () => {
-  const sol = segVal('s_형태') === '용액·혼합물';
-  if (!sol) { $('s_형태칸').innerHTML = '<span class="hint">함량 100%</span>'; return; }
-  if (!SF.F || SF.F.t !== 'sol') SF.F = { t: 'sol', p: 100, s: [] };
-  SF.draw();
-};
-function shipContacts(cust) { const c = custOf(cust); $('contactDl').innerHTML = (c ? list(c['담당자']) : []).map(n => `<option value="${esc(n)}">`).join(''); }
-window.shipCustChanged = () => { shipContacts($('s_고객사').value.trim()); if (!S.ship.id) shipNeedDefault(); };
+  sum(box = 's_형태칸') { const t = +((+this.F.p || 0) + this.F.s.reduce((a, c) => a + (+c.p || 0), 0)).toFixed(2), el = $(box + '_sum'); if (el) el.innerHTML = Math.abs(t - 100) < 0.01 ? '<span class="msg ok">합계 100% ✓</span>' : `<span class="msg bad">합계 ${t}%</span>`; } };
+window.shipCustChanged = () => {};
 function shipCo() { const v = segVal('s_명의'); return v === '기타' ? $('s_기타').value.trim() : v; }
-function shipNeedDefault() { const need = defaultNeed(shipCo(), $('s_고객사').value.trim()); document.querySelectorAll('input[name=s_필요서류]').forEach(c => c.checked = need.includes(c.value)); }
-window.openShip = (id, copy) => {
+const SHIP_KEYS = ['고객사', '출고일', '수량', '서류제출일', '비고'];
+// 출고 기록 창(짧게): 출고사 · 고객사 · 출고일 · 수량 · 서류 제출일 · 비고. 다른 칸(요청일, 제출 형태 등)은 있던 값 그대로 둠
+window.openShip = id => {
   const s = S.cur; let x = id ? rows('출고').find(r => r.id === id) : null;
-  if (!x) { const prev = copy ? shipsOf(s.id)[0] : null;
-    if (copy && !prev) { alert('복사할 이전 출고 건이 없습니다.'); return; }
-    x = prev ? { 명의: prev['명의'], 고객사: prev['고객사'], 고객사담당자: prev['고객사담당자'], 요청내용: prev['요청내용'], 수량: prev['수량'], 제출형태: prev['제출형태'], 필요서류: prev['필요서류'] }
-      : { 명의: namesOf(s)[0] || companyOf(s) || '한인', 고객사: '동우화인켐', 제출형태: JSON.stringify(legacyForm(s) || { t: 'neat' }) };
-    x.요청일 = S.today; }
+  if (!x) { const prev = shipsOf(s.id)[0];
+    x = { 명의: (prev && prev['명의']) || namesOf(s)[0] || companyOf(s) || '한인', 고객사: (prev && prev['고객사']) || '동우화인켐', 수량: (prev && prev['수량']) || '', 출고일: S.today,
+      제출형태: (prev && prev['제출형태']) || JSON.stringify(legacyForm(s) || { t: 'neat' }) }; }
   S.ship = x; const N = coNames(), isEtc = x['명의'] && !N.includes(x['명의']);
   $('custDl').innerHTML = rows('고객사').map(c => `<option value="${esc(c['회사명'])}">`).join('');
   $('etcDl').innerHTML = etcNames().map(n => `<option value="${esc(n)}">`).join('');
-  $('sTitle').textContent = `${x.id ? '출고 수정' : '출고 등록'} — ${s['제품명']}`;
+  $('sTitle').textContent = `${x.id ? '출고 기록 수정' : '출고 기록'} — ${s['제품명']}`;
   seg('s_명의', [...N, '기타'], [isEtc ? '기타' : x['명의']], 'radio', true);
   $('s_기타').value = isEtc ? x['명의'] : ''; const syncEtc = () => { $('s_기타').style.display = segVal('s_명의') === '기타' ? '' : 'none'; };
-  $('s_명의').onchange = () => { syncEtc(); if (!S.ship.id) shipNeedDefault(); }; $('s_기타').oninput = () => { if (!S.ship.id) shipNeedDefault(); };
-  ['고객사', '고객사담당자', '요청일', '요청내용', '수량', '출고일', '서류제출일', '비고'].forEach(k => $('s_' + k).value = x[k] || '');
-  shipContacts(x['고객사']);
-  const f = parseForm(x['제출형태']) || { t: 'neat' }; SF.F = f.t === 'sol' ? JSON.parse(JSON.stringify(f)) : null;
-  seg('s_형태', ['물질 그대로', '용액·혼합물'], [f.t === 'sol' ? '용액·혼합물' : '물질 그대로'], 'radio'); shipFormRender();
-  $('s_필요서류').innerHTML = SUB_DOCS.map(d => `<label><input type="checkbox" name="s_필요서류" value="${d}">${DOC_LABEL[d]}</label>`).join('');
+  $('s_명의').onchange = syncEtc;
+  SHIP_KEYS.forEach(k => $('s_' + k).value = x[k] || '');
   syncEtc();
-  if (x.id || x['필요서류']) { const need = list(x['필요서류']); document.querySelectorAll('input[name=s_필요서류]').forEach(c => c.checked = need.includes(c.value)); }
-  else shipNeedDefault();
   $('sDel').style.visibility = x.id ? '' : 'hidden'; $('sMsg').textContent = '';
   openModal('shipBox');
 };
 window.saveShip = async () => {
   const s = S.cur, x = Object.assign({}, S.ship);
   x['샘플id'] = s.id; x['제품명'] = s['제품명']; x['명의'] = shipCo();
-  ['고객사', '고객사담당자', '요청일', '요청내용', '수량', '출고일', '서류제출일', '비고'].forEach(k => x[k] = $('s_' + k).value.trim());
-  const sol = segVal('s_형태') === '용액·혼합물';
-  const f = sol ? SF.F : { t: 'neat' };
-  if (sol && !f.s.length) { flash('sMsg', '용매를 추가하거나 "물질 그대로"를 고르세요.', false); return; }
-  x['제출형태'] = JSON.stringify(f); x['함량'] = sol ? String(f.p) : '100';
-  x['필요서류'] = segVals('s_필요서류').join(','); delete x['체크'];
+  SHIP_KEYS.forEach(k => x[k] = $('s_' + k).value.trim());
+  if (!x.id && !x['필요서류']) x['필요서류'] = defaultNeed(x['명의'], x['고객사']).join(',');
+  if (!x['함량']) { const f = parseForm(x['제출형태']); x['함량'] = f && f.t === 'sol' ? String(f.p) : '100'; }
+  delete x['체크'];
   if (!x['명의']) { flash('sMsg', '출고사를 고르세요.', false); return; }
   try {
-    if (x['고객사'] && !custOf(x['고객사']) && S.pw && confirm(`"${x['고객사']}"는 거래처에 없는 고객사입니다. 고객사로 추가할까요?\n(일회성이면 [취소] — 이 출고 건에만 이름이 남습니다)`))
-      await save('고객사', { 회사명: x['고객사'], 담당자: x['고객사담당자'] || '', 필요서류: x['필요서류'] || 'MSDS' });
+    if (x['고객사'] && !custOf(x['고객사']) && S.pw && confirm(`"${x['고객사']}"는 거래처에 없는 고객사입니다. 고객사로 추가할까요?\n(일회성이면 [취소] — 이 기록에만 이름이 남습니다)`))
+      await save('고객사', { 회사명: x['고객사'], 필요서류: 'MSDS' });
     const r = await call('saveShipment', x); upsert('출고', r.ship);
     if (r.sample) { upsert('샘플', r.sample); S.cur = r.sample; }
-    closeModal('shipBox'); setTimeout(() => { showDetail(s.id, false, 'ship'); render(); }, 380);
+    closeModal('shipBox'); setTimeout(() => { showDetail(s.id, false, 'info'); render(); }, 380);
   } catch (e) { flash('sMsg', '저장하지 못했습니다: ' + errMsg(e), false); }
 };
-window.delShip = async () => { if (!confirm('이 출고 기록을 지울까요?')) return; await remove('출고', S.ship.id); closeModal('shipBox'); setTimeout(() => showDetail(S.cur.id, false, 'ship'), 380); };
+window.delShip = async () => { if (!confirm('이 출고 기록을 지울까요?')) return; await remove('출고', S.ship.id); closeModal('shipBox'); setTimeout(() => showDetail(S.cur.id, false, 'info'), 380); };
 
 // ---------- 신고면제 ----------
 const EX_KEYS = ['신청일', '통지일', '면제번호', '통지물질명', '통지CAS'];
@@ -801,6 +854,7 @@ window.saveEx = async () => {
     await save('신고면제', e);
     const goDocs = e['면제번호'] && !before && e['결과'] !== '비대상';
     S.detailNote = goDocs ? `${e['기관']} 면제번호가 등록되었습니다. 자진확인서·MSDS를 만드세요.` : '';
+    S.detailCust = goDocs ? e['기관'] : '';
     closeModal('exBox'); setTimeout(() => { showDetail(s.id, false, goDocs ? 'ship' : 'ex'); render(); }, 380);
   } catch (err) { alert('저장하지 못했습니다: ' + ((err && err.message) || err)); }
 };
@@ -829,7 +883,6 @@ function msdsRefresh() {
   const c = S.msdsCtx, s = c && S.samples.find(x => x.id === c.sid), sh = c && c.shipId && rows('출고').find(x => x.id === c.shipId);
   $('m_from').textContent = s ? `${s['관리번호'] || ''} ${s['제품명']}${sh ? ` · ${sh['요청일'] || ''} ${sh['고객사'] || ''} 출고 건 (${sh['명의']})` : ''}` : '';
 }
-window.goMsdsShip = shipId => { const s = S.cur, sh = rows('출고').find(x => x.id === shipId); msdsFromSample(s, sh); navTo('msds', s.id, 'ship'); };
 const companyInfoFor = form => { const c = coOf(form) || {}; return { 회사명: c['회사명'] || '', 주소: c['주소'] || '', 전화: c['전화'] || '' }; };
 window.msdsPick = () => { const s = S.samples.find(x => x['제품명'] === $('m_제품명').value); if (s) { msdsFromSample(s, shipsOf(s.id)[0]); msdsRefresh(); } };
 function renderSolv() {
@@ -912,6 +965,8 @@ function renderSettings() {
   if (S.setTab === '기타') {
     body.innerHTML = `<div class="box" style="max-width:900px"><h3>서류 공통 값<span class="sp"></span><span class="msg" id="setMsg"></span><button class="primary" onclick="saveEtc()">저장</button></h3>
       <div class="f">${ETC_FIELDS.map(([id, lab, cl, area]) => `<div class="${cl}"><label>${lab}</label>${area ? `<textarea class="plain" id="set_${id}">${esc(setting(id, ''))}</textarea>` : `<input id="set_${id}" value="${esc(setting(id, ''))}">`}</div>`).join('')}</div></div>`;
+    body.insertAdjacentHTML('beforeend', `<div class="box" style="max-width:900px"><h3>구조 배치 정리<span class="sp"></span><span class="msg" id="tidyMsg"></span><button onclick="tidyAll()">모든 구조 정리</button></h3>
+      <p class="hint" style="margin:0">구조가 찌그러져 보이는 샘플·단량체의 원자 배치를 켐드로우처럼 다시 잡습니다. 구조(연결)는 바뀌지 않고 그림 배치만 바뀝니다.</p></div>`);
   } else {
     const cols = ['약어', '물질명', 'CAS'];
     body.innerHTML = `<div class="box"><h3>단량체 사전</h3>
@@ -920,6 +975,20 @@ function renderSettings() {
       <td style="white-space:nowrap;text-align:right"><button class="sm" onclick="setSave('단량체',this)">저장</button>${r.id ? ` <button class="sm danger" onclick="setDel('단량체','${r.id}')">삭제</button>` : ''}</td></tr>`; }).join('') + '</table></div>';
   }
 }
+window.tidyAll = async () => {
+  if (!confirm('모든 샘플과 단량체의 구조 배치를 다시 잡을까요? (구조 자체는 그대로)')) return;
+  const jobs = [...S.samples.filter(s => s.idcode).map(s => ['샘플', s]), ...rows('단량체').filter(r => r.idcode).map(r => ['단량체', r])], out = { 샘플: [], 단량체: [] };
+  let n = 0;
+  for (const [t, r] of jobs) {
+    n++; if (n % 10 === 0) { flash('tidyMsg', `정리 중… ${n}/${jobs.length}`); await new Promise(ok => setTimeout(ok)); }
+    try { const m0 = molFrom(r.idcode, r['좌표']); if (!m0) continue; const m = await tidyMol(m0), ic = m.getIDCodeAndCoordinates();
+      if (ic.idCode === r.idcode && ic.coordinates !== r['좌표']) out[t].push({ id: r.id, 좌표: ic.coordinates }); } catch (e) { console.warn(r.id, e); }
+  }
+  try {
+    for (const t of ['샘플', '단량체']) if (out[t].length) { await call('saveField', S.pw, t, '좌표', out[t]); out[t].forEach(x => { const r = rows(t).find(y => y.id === x.id); if (r) r['좌표'] = x.좌표; }); }
+    S.mols = {}; S.dmols = {}; flash('tidyMsg', `✓ ${out['샘플'].length + out['단량체'].length}개 정리함`); render();
+  } catch (e) { flash('tidyMsg', '저장하지 못했습니다: ' + errMsg(e), false); }
+};
 window.setSave = async (t, btn) => {
   const tr = btn.closest('tr'), o = Object.assign({}, rows(t).find(r => r.id === tr.dataset.id) || {});
   tr.querySelectorAll('input[data-c]').forEach(i => o[i.dataset.c] = i.value.trim());
@@ -1050,7 +1119,7 @@ function renderPartners() {
         <div class="sub">관리 샘플 ${n}건 · 출고 ${sh}건 · MSDS ${esc(c['MSDS양식'] || '한인')} 양식</div>
         <div class="badges">${d.map(x => `<span class="b info">${DOC_LABEL[x] || x}</span>`).join('') || '<span class="b etc">작성 서류 없음 (기록만)</span>'}</div>
         <div class="badges">${miss.map(k => `<span class="miss">${k} 없음</span>`).join('')}</div></div>`; }).join('') + '</div>' +
-      (etc.length ? `<h3 style="margin:22px 0 10px;font-size:15px">기타 출고사</h3><div class="pgrid">` + etc.map(nm => { const n = S.samples.filter(s => s['관리회사'] === '기타' && s['기타회사'] === nm).length, sh = rows('출고').filter(x => x['명의'] === nm).length;
+      (etc.length ? `<h3 style="margin:22px 0 10px;font-size:16px">기타 출고사</h3><div class="pgrid">` + etc.map(nm => { const n = S.samples.filter(s => s['관리회사'] === '기타' && s['기타회사'] === nm).length, sh = rows('출고').filter(x => x['명의'] === nm).length;
         return `<div class="pcard" style="border-style:dashed;cursor:default"><h4>${esc(nm)}</h4><div class="sub">기타로 관리 중 · 샘플 ${n}건 · 출고 ${sh}건</div>
           <div><button class="sm edit-only" onclick="promote('${esc(nm)}')">정식 출고사로 등록</button></div></div>`; }).join('') + '</div>' : '');
   }
@@ -1071,7 +1140,7 @@ window.openPartner = (kind, id) => {
     html += `<div class="box" style="margin-top:14px"><h3>기본 필요 서류</h3><div class="chk">${SUB_DOCS.map(d => `<label><input type="checkbox" data-need="${d}" ${list(r['필요서류']).includes(d) ? 'checked' : ''} ${ro}>${DOC_LABEL[d]}</label>`).join('')}</div></div>`;
     if (id) { const n = r['회사명'], sh = rows('출고').filter(x => x['고객사'] === n), ex = rows('신고면제').filter(e => (e['기관'] || '동우화인켐') === n);
       html += `<div class="box"><h3>거래 이력</h3>${sh.length || ex.length ? `<table class="tbl"><tr><th>구분</th><th>샘플</th><th>날짜</th><th>내용</th></tr>` +
-        sh.map(x => { const s = S.samples.find(y => y.id === x['샘플id']) || {}; return `<tr style="cursor:pointer" onclick="closeAllModals();showDetail('${x['샘플id']}',false,'ship')"><td>출고</td><td>${esc(s['관리번호'] || '')} ${esc(s['제품명'] || x['제품명'])}</td><td>${esc(x['요청일'] || '')}</td><td>${coBadge(x['명의'])} ${esc(formText(parseForm(x['제출형태'])))}</td></tr>`; }).join('') +
+        sh.map(x => { const s = S.samples.find(y => y.id === x['샘플id']) || {}; return `<tr style="cursor:pointer" onclick="closeAllModals();showDetail('${x['샘플id']}',false,'info')"><td>출고</td><td>${esc(s['관리번호'] || '')} ${esc(s['제품명'] || x['제품명'])}</td><td>${esc(x['요청일'] || '')}</td><td>${coBadge(x['명의'])} ${esc(formText(parseForm(x['제출형태'])))}</td></tr>`; }).join('') +
         ex.map(e => { const s = S.samples.find(y => y.id === e['샘플id']) || {}, st = exState(e); return `<tr style="cursor:pointer" onclick="closeAllModals();showDetail('${e['샘플id']}',false,'ex')"><td>신고면제</td><td>${esc(s['관리번호'] || '')} ${esc(s['제품명'] || e['제품명'])}</td><td>${esc(e['신청일'] || '')}</td><td><span class="b ${st.cls}">${st.txt}</span></td></tr>`; }).join('') + '</table>' : '<p class="empty">아직 없음</p>'}</div>`; }
   } else {
     const d = list(r['작성서류']);
@@ -1089,12 +1158,20 @@ window.openPartner = (kind, id) => {
   openModal('ptBox');
 };
 window.stampUpload = inp => {
+  // 직인 그림: 최대 640픽셀로 유지, 종이(흰색)는 부드럽게 투명, 잉크는 한 가지 빨강으로 → 인쇄해도 선명하게
   const f = inp.files[0]; if (!f) return; const img = new Image();
-  img.onload = () => { let size = 260, b64 = '';
+  img.onload = () => { let size = 640, b64 = '';
     do { const k = Math.min(1, size / Math.max(img.width, img.height)), cv = document.createElement('canvas'); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
-      const g = cv.getContext('2d'); g.drawImage(img, 0, 0, cv.width, cv.height); const d = g.getImageData(0, 0, cv.width, cv.height), p = d.data;
-      for (let i = 0; i < p.length; i += 4) { const red = p[i] - (p[i + 1] + p[i + 2]) / 2; if (p[i] > 200 && p[i + 1] > 200 && p[i + 2] > 200) p[i + 3] = 0; else if (red > 40) { p[i + 3] = Math.min(255, red * 2.2); } }
-      g.putImageData(d, 0, 0); b64 = cv.toDataURL('image/png').split(',')[1]; size -= 40; } while (b64.length > 45000 && size > 80);
+      const g = cv.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, cv.width, cv.height); const d = g.getImageData(0, 0, cv.width, cv.height), p = d.data;
+      let n = 0, sr = 0, sg = 0, sb = 0;
+      for (let i = 0; i < p.length; i += 4) { const gb = (p[i + 1] + p[i + 2]) / 2; if (p[i + 3] > 200 && gb < 90 && p[i] > 120) { n++; sr += p[i]; sg += p[i + 1]; sb += p[i + 2]; } }
+      const ink = n ? [sr / n, sg / n, sb / n] : [200, 20, 30];
+      for (let i = 0; i < p.length; i += 4) {
+        const gb = (p[i + 1] + p[i + 2]) / 2, red = p[i] - gb, a0 = p[i + 3] / 255;
+        let a = red > 25 ? Math.min(1, Math.max(0, (225 - gb) / 150)) : 0; a *= a0;
+        p[i] = ink[0]; p[i + 1] = ink[1]; p[i + 2] = ink[2]; p[i + 3] = Math.round(a * 255);
+      }
+      g.putImageData(d, 0, 0); b64 = cv.toDataURL('image/png').split(',')[1]; size -= 80; } while (b64.length > 170000 && size > 120);
     S.pt.r['직인'] = b64; $('pt_stamp').innerHTML = `<img src="data:image/png;base64,${b64}">`; URL.revokeObjectURL(img.src); };
   img.src = URL.createObjectURL(f);
 };

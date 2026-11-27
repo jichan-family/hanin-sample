@@ -69,6 +69,7 @@ class MolEditor {
        <div class="me-grp me-els">${els.map(e => btn('el:' + e, `<b style="color:${ECOLOR[e]}">${e}</b>`, e + ' 원자')).join('')}</div>
        <div class="me-grp">${btn('plus', ICON.plus, '양전하 (+)')}${btn('minus', ICON.minus, '음전하 (−)')}</div>
        <div class="me-grp">${btn('undo', ICON.undo, '되돌리기 (Ctrl+Z)', 'act')}${btn('redo', ICON.redo, '다시 실행 (Ctrl+Y)', 'act')}${btn('fit', ICON.fit, '화면에 맞추기', 'act')}</div>
+       ${this.fragment ? '' : '<button type="button" class="me-btn me-clear act" data-t="tidy" title="원자 배치를 켐드로우처럼 보기 좋게 다시 잡습니다">구조 정리</button>'}
        <button type="button" class="me-btn me-clear act" data-t="clear" title="모두 지우기">모두 지우기</button>`;
     this.tplBar.innerHTML = '<span class="me-tlabel">골격</span>' + TEMPLATES.map((t, i) => `<button type="button" class="me-tpl" data-tpl="${i}">${t[0]}</button>`).join('');
     this.side.addEventListener('click', e => {
@@ -76,6 +77,7 @@ class MolEditor {
       const t = b.dataset.t;
       if (t === 'undo') return this.undo(); if (t === 'redo') return this.redo();
       if (t === 'fit') { this.fit(); return this.redraw(); }
+      if (t === 'tidy') { if (this.isEmpty()) return; b.disabled = true; window.tidyMol(this.getMolecule()).then(m => this.setMolecule(m)).catch(er => alert(er.message || er)).finally(() => { b.disabled = false; }); return; }
       if (t === 'clear') { this.push(); this.atoms = []; this.bonds = []; this.sel.clear(); return this.changed(); }
       this.setTool(t);
     });
@@ -365,8 +367,8 @@ class MolEditor {
     for (let b = 0; b < m.getAllBonds(); b++) bonds.push({ a: m.getBondAtom(0, b), b: m.getBondAtom(1, b), o: Math.min(3, Math.max(1, m.getBondOrder(b))) });
     return { atoms, bonds };
   }
-  setMolecule(m) {
-    this.push(); const t = this.fromOCL(m); this.atoms = t.atoms; this.bonds = t.bonds; this.sel.clear(); this.fit(); this.changed();
+  setMolecule(m, noUndo) {
+    if (!noUndo) this.push(); const t = this.fromOCL(m); this.atoms = t.atoms; this.bonds = t.bonds; this.sel.clear(); this.fit(); this.changed();
   }
   getMolecule() {
     const M = window.S.OCL.Molecule, m = new M(this.atoms.length, this.bonds.length);

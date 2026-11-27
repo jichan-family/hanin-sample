@@ -29,6 +29,7 @@ function mk(){ const h={ok:null,no:null}; const p=new Proxy({}, {get:(t,fn)=>{ i
   else if(fn==='verifyPassword') r=a[0]==='1185';
   else if(fn==='saveRow'){ const o=Object.assign({},a[2]); if(!o.id){o.id='n'+(++uid); o['등록일']='2026-11-26 10:00';} if(a[1]==='샘플'&&!o['관리번호']&&o['관리회사']){ const pre=o['관리회사']; const mx=Math.max(0,...d.data['샘플'].map(s=>{const m=String(s['관리번호']).match(/^(.*)-(\\d+)$/);return m&&m[1]===pre?+m[2]:0;})); o['관리번호']=pre+'-'+(mx+1); d.data['샘플'].push(o);} o['수정일']='2026-11-26 10:00'; window.__saved=(window.__saved||[]).concat([[a[1],o]]); r=o; }
   else if(fn==='deleteRow') r=true;
+  else if(fn==='saveField') r=a[3].length;
   else if(fn==='saveShipment'){ const o=Object.assign({},a[0]); if(!o.id) o.id='sh'+(++uid); const s=window.S.samples.find(x=>x.id===o['샘플id']); let smp=null; if(s){ const nm=(s['명의']||'').split(',').filter(Boolean); if(!nm.includes(o['명의'])){ nm.push(o['명의']); smp=Object.assign({},s,{명의:nm.join(',')}); } } window.__saved=(window.__saved||[]).concat([['출고',o]]); r={ship:o,sample:smp}; }
   else if(fn==='promoteCompany'){ const nm=a[1]; const co={id:'k'+(++uid),이름:nm,회사명:nm,색:'#8250df',작성서류:'MSDS',MSDS양식:'한인',정식:'Y',순서:'9'}; const moved=window.S.samples.filter(s=>s['관리회사']==='기타'&&s['기타회사']===nm).map(s=>Object.assign({},s,{관리회사:nm})); r={company:co,samples:moved}; }
   else if(fn==='toPdf'){ window.__pdf=(window.__pdf||0)+1; r=btoa('%PDF-1.4 fake'); }

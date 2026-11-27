@@ -6,6 +6,7 @@ const LIBS = {
   pdfjs: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
   pdfworker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
   pdfcmaps: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+  rdkit: 'https://cdn.jsdelivr.net/npm/@rdkit/rdkit@2026.9.3/dist/RDKit_minimal.js',
 };
 const loaded = {};
 function loadScript(key) {
@@ -373,7 +374,7 @@ async function deliver(blob, base, ext, fmt) {
     download(new Blob([b64ToBytes(b64)], { type: 'application/pdf' }), base + '.pdf');
   }
 }
-async function buildSelfCheck(v) { const T = await templates(); return fillDocx(T.selfcheck, v); }
+async function buildSelfCheck(v, stampB64) { const T = await templates(); return fillDocx(T.selfcheck, v, { 'word/media/image1.png': stampB64 ? b64ToBytes(stampB64) : null }); }
 async function buildCasCert(v, mol, stampB64) { const T = await templates(); return fillDocx(T.cas, v, { 'word/media/image1.png': await structurePng(mol), 'word/media/stamp.png': stampB64 ? b64ToBytes(stampB64) : null }); }
 
 // ---------- 통지서 읽기 ----------
